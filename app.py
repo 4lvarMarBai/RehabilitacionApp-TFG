@@ -5,6 +5,9 @@
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
+import hashlib
+import hmac
+import secrets
 
 import pandas as pd
 import streamlit as st
@@ -171,6 +174,18 @@ def inicializar_db(conn):
             actor TEXT NOT NULL,
             fecha TEXT NOT NULL
         );
+        
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            nombre_completo TEXT NOT NULL,
+            dni TEXT NOT NULL UNIQUE,
+            profesion TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('ADMIN', 'CLINICO')),
+            activo INTEGER NOT NULL DEFAULT 1,
+            creado_en TEXT NOT NULL
+        );
         """
     )
 
@@ -201,6 +216,121 @@ inicializar_db(conn)
 # ============================================================
 # 3. FUNCIONES COMUNES
 # ============================================================
+ITERACIONES_PBKDF2 = 310_000
+
+
+def hash_password(password):
+    """Genera un hash de contraseña con sal aleatoria."""
+    salt = secrets.token_bytes(16)
+    derived_key = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        ITERACIONES_PBKDF2,
+    )
+
+    return (
+        f"pbkdf2_sha256${ITERACIONES_PBKDF2}"
+        f"${salt.hex()}${derived_key.hex()}"
+    )
+
+
+def verificar_password(password, password_hash):
+    """Comprueba la contraseña frente al hash guardado."""
+    try:
+        algoritmo, iteraciones_texto, salt_hex, hash_guardado = (
+            password_hash.split("$", maxsplit=3)
+        )
+
+        if algoritmo != "pbkdf2_sha256":
+            return False
+
+        hash_calculado = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iteraciones_texto),
+        ).hex()
+
+        return hmac.compare_digest(hash_calculado, hash_guardado)
+
+    except (ValueError, TypeError):
+        return False
+
+
+def crear_usuario(
+    username,
+    nombre_completo,
+    dni,
+    profesion,
+    password,
+    role="CLINICO",
+):
+    """Crea un usuario en la base SQLite actual."""
+    username = username.strip().lower()
+    nombre_completo = nombre_completo.strip()
+    dni = dni.strip().upper()
+
+    if len(password) < 12:
+        raise ValueError("La contraseña debe tener al menos 12 caracteres.")
+
+    if role not in ("ADMIN", "CLINICO"):
+        raise ValueError("El rol debe ser ADMIN o CLINICO.")
+
+    conn.execute(
+        """
+        INSERT INTO usuarios (
+            username,
+            nombre_completo,
+            dni,
+            profesion,
+            password_hash,
+            role,
+            activo,
+            creado_en
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        """,
+        (
+            username,
+            nombre_completo,
+            dni,
+            profesion,
+            hash_password(password),
+            role,
+            datetime.now().isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def autenticar_usuario(username, password):
+    """Devuelve el usuario si las credenciales son válidas."""
+    fila = conn.execute(
+        """
+        SELECT id, username, nombre_completo, dni, profesion,
+               role, password_hash, activo
+        FROM usuarios
+        WHERE username = ?
+        LIMIT 1
+        """,
+        (username.strip().lower(),),
+    ).fetchone()
+
+    if fila is None or not fila["activo"]:
+        return None
+
+    if not verificar_password(password, fila["password_hash"]):
+        return None
+
+    return {
+        "id": fila["id"],
+        "username": fila["username"],
+        "nombre_completo": fila["nombre_completo"],
+        "dni": fila["dni"],
+        "profesion": fila["profesion"],
+        "role": fila["role"],
+    }
 
 def consultar(sql, params=()):
     """Ejecuta una consulta y devuelve sus resultados."""
