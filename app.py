@@ -8,6 +8,7 @@ from pathlib import Path
 import hashlib
 import hmac
 import secrets
+import os
 
 import pandas as pd
 import streamlit as st
@@ -70,6 +71,9 @@ ESPECIALIDADES_INICIALES = {
     "Rehabilitación neurológica": ["General"],
 }
 
+USUARIO_ADMIN = "host"
+PASSWORD_TEMPORAL = "123456789"
+PASSWORD_HOST = os.environ.get("PASSWORD_HOST", "").strip()
 
 # ============================================================
 # 2. BASE DE DATOS
@@ -184,12 +188,36 @@ def inicializar_db(conn):
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('ADMIN', 'CLINICO')),
             activo INTEGER NOT NULL DEFAULT 1,
+            debe_cambiar_password INTEGER NOT NULL DEFAULT 1,
             creado_en TEXT NOT NULL
         );
         """
     )
 
+    columnas_usuarios = {
+        fila["name"]
+        for fila in conn.execute("PRAGMA table_info(usuarios)").fetchall()
+    }
+    if "debe_cambiar_password" not in columnas_usuarios:
+        conn.execute(
+            "ALTER TABLE usuarios ADD COLUMN debe_cambiar_password INTEGER NOT NULL DEFAULT 1"
+        )
+        conn.commit()
+
     for especialidad, areas in ESPECIALIDADES_INICIALES.items():
+        columnas_usuarios = {
+            fila["name"]
+            for fila in conn.execute("PRAGMA table_info(usuarios)").fetchall()
+        }
+
+        if "debe_cambiar_password" not in columnas_usuarios:
+            conn.execute(
+                """
+                ALTER TABLE usuarios
+                ADD COLUMN debe_cambiar_password INTEGER NOT NULL DEFAULT 1
+                """
+            )
+            conn.commit()
         conn.execute(
             "INSERT OR IGNORE INTO especialidades(nombre) VALUES (?)",
             (especialidad,),
@@ -212,11 +240,39 @@ def inicializar_db(conn):
 conn = conectar_db()
 inicializar_db(conn)
 
+if "usuario_actual" not in st.session_state:
+    st.session_state["usuario_actual"] = None
+
+if st.session_state["usuario_actual"] is None:
+    st.title("Acceso al sistema")
+
+    username = st.text_input("Usuario")
+    password = st.text_input("Contraseña", type="password")
+
+    if st.button("Iniciar sesión"):
+        usuario = autenticar_usuario(username, password)
+
+        if usuario:
+            st.session_state["usuario_actual"] = usuario
+            st.rerun()
+        else:
+            st.error("Usuario o contraseña incorrectos.")
+
+    if not conn.execute(
+        "SELECT 1 FROM usuarios LIMIT 1"
+    ).fetchone():
+        st.info(
+            "Todavía no hay usuarios. Configura ADMIN_INITIAL_PASSWORD "
+            "con una contraseña de al menos 12 caracteres y reinicia la app."
+        )
+
+    st.stop()
+
 
 # ============================================================
 # 3. FUNCIONES COMUNES
 # ============================================================
-ITERACIONES_PBKDF2 = 310_000
+ITERACIONES_PBKDF2 = 600_000
 
 
 def hash_password(password):
@@ -271,7 +327,7 @@ def crear_usuario(
     nombre_completo = nombre_completo.strip()
     dni = dni.strip().upper()
 
-    if len(password) < 12:
+    if len(password) < 8:
         raise ValueError("La contraseña debe tener al menos 12 caracteres.")
 
     if role not in ("ADMIN", "CLINICO"):
@@ -287,9 +343,10 @@ def crear_usuario(
             password_hash,
             role,
             activo,
+            debe_cambiar_password,
             creado_en
         )
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
         """,
         (
             username,
@@ -303,13 +360,43 @@ def crear_usuario(
     )
     conn.commit()
 
+def asegurar_admin_host():
+    """Crea host una sola vez usando una contrasena configurada externamente."""
+    fila = conn.execute(
+        "SELECT role, activo FROM usuarios WHERE username = ?",
+        (USUARIO_ADMIN,),
+    ).fetchone()
+
+    if fila:
+        if fila["role"] != "ADMIN" or not fila["activo"]:
+            raise RuntimeError(
+                "La cuenta host existe, pero no est? activa con rol ADMIN."
+            )
+        return
+
+    password_inicial = os.environ.get("HOST_ADMIN_PASSWORD", "").strip()
+    if len(password_inicial) < 16:
+        raise RuntimeError(
+            "Define HOST_ADMIN_PASSWORD en el entorno con al menos "
+            "16 caracteres antes del primer inicio."
+        )
+
+    crear_usuario(
+        username=USUARIO_ADMIN,
+        nombre_completo="Administrador del sistema",
+        dni="HOST-ADMIN",
+        profesion="Administrador",
+        password=password_inicial,
+        role="ADMIN",
+    )
+
 
 def autenticar_usuario(username, password):
     """Devuelve el usuario si las credenciales son válidas."""
     fila = conn.execute(
         """
         SELECT id, username, nombre_completo, dni, profesion,
-               role, password_hash, activo
+               role, password_hash, activo, debe_cambiar_password
         FROM usuarios
         WHERE username = ?
         LIMIT 1
@@ -330,7 +417,68 @@ def autenticar_usuario(username, password):
         "dni": fila["dni"],
         "profesion": fila["profesion"],
         "role": fila["role"],
+        "debe_cambiar_password": bool(fila["debe_cambiar_password"]),
     }
+
+def exigir_admin():
+    usuario = st.session_state.get("usuario_actual")
+
+    if not usuario or usuario.get("role") != "ADMIN":
+        st.error("Esta acción requiere permisos de administrador.")
+        st.stop()
+
+def pagina_administracion():
+    exigir_admin()
+    st.title("Administración de usuarios")
+    st.caption(
+        "Las cuentas nuevas reciben una contraseña temporal aleatoria y "
+        "deben cambiarla al iniciar sesión."
+    )
+
+    with st.form("formulario_nuevo_usuario"):
+        username_nuevo = st.text_input("Nombre de usuario").strip().lower()
+        nombre_nuevo = st.text_input("Nombre completo").strip()
+        dni_nuevo = st.text_input("DNI").strip().upper()
+        profesion_nueva = st.text_input("Profesión").strip()
+        rol_nuevo = st.selectbox("Rol", ["CLINICO", "ADMIN"])
+        crear_nuevo = st.form_submit_button("Crear usuario")
+
+    if crear_nuevo:
+        exigir_admin()
+        if not all((username_nuevo, nombre_nuevo, dni_nuevo, profesion_nueva)):
+            st.error("Completa todos los campos.")
+        else:
+            password_temporal_nueva = secrets.token_urlsafe(18)
+            try:
+                crear_usuario(
+                    username=username_nuevo,
+                    nombre_completo=nombre_nuevo,
+                    dni=dni_nuevo,
+                    profesion=profesion_nueva,
+                    password=password_temporal_nueva,
+                    role=rol_nuevo,
+                )
+            except sqlite3.IntegrityError:
+                st.error("Ese nombre de usuario o DNI ya está registrado.")
+            else:
+                st.success(
+                    f"Usuario {username_nuevo} creado. "
+                    f"Contraseña temporal (muéstrala al usuario ahora): "
+                    f"{password_temporal_nueva}"
+                )
+
+    filas_usuarios = conn.execute(
+        """
+        SELECT username, nombre_completo, dni, profesion, role, activo
+        FROM usuarios
+        ORDER BY username
+        """
+    ).fetchall()
+    st.dataframe(
+        [dict(fila) for fila in filas_usuarios],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 def consultar(sql, params=()):
     """Ejecuta una consulta y devuelve sus resultados."""
@@ -1579,6 +1727,208 @@ def pagina_auditoria():
         hide_index=True,
     )
 
+    try:
+        asegurar_admin_host()
+    except RuntimeError as error:
+        st.error(str(error))
+        st.stop()
+
+    if "usuario_actual" not in st.session_state:
+        st.session_state["usuario_actual"] = None
+
+    if st.session_state["usuario_actual"] is None:
+        st.title("Acceso al sistema")
+        username = st.text_input("Usuario")
+        password = st.text_input("Contrasena", type="password")
+
+        if st.button("Iniciar sesi?n"):
+            usuario = autenticar_usuario(username, password)
+            if usuario:
+                st.session_state["usuario_actual"] = usuario
+                st.rerun()
+            else:
+                st.error("Usuario o contrasena incorrectos.")
+
+        st.stop()
+
+    usuario_actual = st.session_state["usuario_actual"]
+    if usuario_actual["debe_cambiar_password"]:
+        st.title("Cambia tu contrasena")
+        nueva_password = st.text_input(
+            "Nueva contrasena", type="password", key="nueva_password"
+        )
+        repetir_password = st.text_input(
+            "Repite la nueva contrasena", type="password", key="repetir_password"
+        )
+
+        if st.button("Guardar nueva contrasena"):
+            if len(nueva_password) < 12:
+                st.error("La contrasena debe tener al menos 12 caracteres.")
+            elif nueva_password != repetir_password:
+                st.error("Las contrasenas no coinciden.")
+            else:
+                conn.execute(
+                    """
+                    UPDATE usuarios
+                    SET password_hash = ?, debe_cambiar_password = 0
+                    WHERE id = ?
+                    """,
+                    (hash_password(nueva_password), usuario_actual["id"]),
+                )
+                conn.commit()
+                st.session_state["usuario_actual"]["debe_cambiar_password"] = False
+                st.success("Contrasena actualizada.")
+                st.rerun()
+
+        st.stop()
+
+    # 12. MENÚ Y NAVEGACIÓN
+    # ============================================================
+
+    st.sidebar.title("🏥 Rehabilitación")
+
+    opciones_paginas = [
+        "📊 Panel de control",
+        "📝 Nueva solicitud",
+        "📋 Lista de espera",
+        "⚕️ Tratamientos activos",
+        "📈 Seguimiento clínico",
+        "📉 Dashboard clínico",
+        "🧾 Auditoría clínica",
+    ]
+    if st.session_state["usuario_actual"].get("role") == "ADMIN":
+        opciones_paginas.append("Administracion")
+
+
+    if "usuario_actual" not in st.session_state:
+        st.session_state["usuario_actual"] = None
+
+    total_usuarios = conn.execute(
+        "SELECT COUNT(*) AS total FROM usuarios"
+    ).fetchone()["total"]
+
+    # Si todavía no hay usuarios, permite crear el primer administrador.
+    if total_usuarios == 0:
+        st.title("Configuración inicial")
+
+        st.info(
+            f"El primer administrador elegirá su nombre de usuario. "
+            f"La contraseña temporal será: {PASSWORD_TEMPORAL}"
+        )
+
+        with st.form("formulario_primer_admin"):
+            username_admin = st.text_input("Nombre de usuario")
+            nombre_admin = st.text_input("Nombre completo")
+            dni_admin = st.text_input("DNI")
+            profesion_admin = st.text_input(
+                "Profesión",
+                value="Administrador",
+            )
+
+            crear_admin = st.form_submit_button(
+                "Crear administrador"
+            )
+
+        if crear_admin:
+            if not username_admin.strip():
+                st.error("Escribe un nombre de usuario.")
+            elif not nombre_admin.strip():
+                st.error("Escribe el nombre completo.")
+            elif not dni_admin.strip():
+                st.error("Escribe el DNI.")
+            elif not profesion_admin.strip():
+                st.error("Escribe la profesión.")
+            else:
+                try:
+                    crear_usuario(
+                        username=username_admin,
+                        nombre_completo=nombre_admin,
+                        dni=dni_admin,
+                        profesion=profesion_admin,
+                        password=PASSWORD_TEMPORAL,
+                        role="ADMIN",
+                    )
+                    st.success(
+                        "Administrador creado. Inicia sesión con el nombre "
+                        "que has elegido y la contraseña temporal."
+                    )
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Ese nombre de usuario o DNI ya está registrado.")
+
+        st.stop()
+
+    # Formulario de acceso para los usuarios existentes.
+    if st.session_state["usuario_actual"] is None:
+        st.title("Acceso al sistema")
+
+        username = st.text_input("Usuario")
+        password = st.text_input("Contraseña", type="password")
+
+        if st.button("Iniciar sesión"):
+            usuario = autenticar_usuario(username, password)
+
+            if usuario:
+                st.session_state["usuario_actual"] = usuario
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
+
+        st.stop()
+
+    # Obliga al usuario a cambiar la contraseña temporal.
+    usuario_actual = st.session_state["usuario_actual"]
+
+    if usuario_actual["debe_cambiar_password"]:
+        st.title("Cambia tu contraseña")
+
+        nueva_password = st.text_input(
+            "Nueva contraseña",
+            type="password",
+            key="nueva_password",
+        )
+        repetir_password = st.text_input(
+            "Repite la nueva contraseña",
+            type="password",
+            key="repetir_password",
+        )
+
+        if st.button("Guardar nueva contraseña"):
+            if len(nueva_password) < 8:
+                st.error("La contraseña debe tener al menos 8 caracteres.")
+            elif nueva_password == PASSWORD_TEMPORAL:
+                st.error("Elige una contraseña distinta de la temporal.")
+            elif nueva_password != repetir_password:
+                st.error("Las contraseñas no coinciden.")
+            else:
+                conn.execute(
+                    """
+                    UPDATE usuarios
+                    SET password_hash = ?,
+                        debe_cambiar_password = 0
+                    WHERE id = ?
+                    """,
+                    (
+                        hash_password(nueva_password),
+                        usuario_actual["id"],
+                    ),
+                )
+                conn.commit()
+
+                st.session_state["usuario_actual"][
+                    "debe_cambiar_password"
+                ] = False
+
+                st.success("Contraseña actualizada.")
+                st.rerun()
+
+        st.stop()
+
+try:
+    asegurar_admin_host()
+except RuntimeError as error:
+    st.error(str(error))
+    st.stop()
 
 # ============================================================
 # 12. MENÚ Y NAVEGACIÓN
@@ -1598,6 +1948,19 @@ pagina = st.sidebar.radio(
         "🧾 Auditoría clínica",
     ],
 )
+if st.session_state["usuario_actual"].get("role") == "ADMIN":
+    pagina.append("Administracion")
+
+usuario_actual = st.session_state["usuario_actual"]
+
+st.sidebar.markdown(
+    f"**Usuario:** {usuario_actual['nombre_completo']}"
+)
+st.sidebar.markdown(f"**Rol:** {usuario_actual['role']}")
+
+if st.sidebar.button("Cerrar sesión"):
+    st.session_state["usuario_actual"] = None
+    st.rerun()
 
 st.sidebar.divider()
 
