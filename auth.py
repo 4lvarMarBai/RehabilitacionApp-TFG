@@ -1,4 +1,7 @@
 import hashlib
+import hmac
+import os
+import secrets
 from database import fetch_all, execute_sql
 
 
@@ -12,13 +15,43 @@ PROFESIONES_DISPONIBLES = [
 
 PASSWORD_TEMPORAL_POR_DEFECTO = "123456789"
 
+PBKDF2_ITERATIONS = 600_000
+PASSWORD_HASH_PREFIX = "pbkdf2_sha256$"
+
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    salt = secrets.token_bytes(16)
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    ).hex()
+
+    return (
+        f"{PASSWORD_HASH_PREFIX}"
+        f"{PBKDF2_ITERATIONS}${salt.hex()}${password_hash}"
+    )
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    return hash_password(password) == password_hash
+def verify_password(password: str, stored_hash: str) -> bool:
+    if stored_hash.startswith(PASSWORD_HASH_PREFIX):
+        try:
+            _, iterations, salt_hex, expected_hash = stored_hash.split("$")
+            calculated_hash = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                bytes.fromhex(salt_hex),
+                int(iterations),
+            ).hex()
+        except (ValueError, TypeError):
+            return False
+
+        return hmac.compare_digest(calculated_hash, expected_hash)
+
+    # Compatibilidad con los hashes antiguos
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(legacy_hash, stored_hash)
 
 
 def init_auth_db(conn):
@@ -62,22 +95,43 @@ def create_user(conn, username: str, full_name: str, dni: str, profession: str, 
 
 
 def ensure_admin_user(conn):
-    _, rows = fetch_all(conn, "SELECT id FROM users WHERE username = %s", ("admin",))
-    if not rows:
-        execute_sql(conn, """
-            INSERT INTO users (
-                username, full_name, dni, profession, password_hash, role,
-                must_change_password, active
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, FALSE, TRUE)
-        """, (
-            "admin",
-            "Administrador del sistema",
-            "00000000T",
-            "Administrador",
-            hash_password("Admin1234"),
-            "ADMIN",
-        ))
+    _, rows = fetch_all(
+        conn,
+        "SELECT id FROM users WHERE username = %s",
+        ("admin",),
+    )
+
+    if rows:
+        return
+
+    initial_password = os.getenv("ADMIN_INITIAL_PASSWORD", "").strip()
+
+    if len(initial_password) < 12:
+        raise RuntimeError(
+            "Configura ADMIN_INITIAL_PASSWORD con al menos "
+            "12 caracteres antes de crear el administrador inicial."
+        )
+
+    execute_sql(conn, """
+        INSERT INTO users (
+            username,
+            full_name,
+            dni,
+            profession,
+            password_hash,
+            role,
+            must_change_password,
+            active
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, TRUE, TRUE)
+    """, (
+        "admin",
+        "Administrador del sistema",
+        "00000000T",
+        "Administrador",
+        hash_password(initial_password),
+        "ADMIN",
+    ))
 
 
 def authenticate_user(conn, username: str, password: str):
@@ -97,7 +151,11 @@ def authenticate_user(conn, username: str, password: str):
         return None
 
     if not verify_password(password, password_hash):
-        return None
+        execute_sql(
+            conn,
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(password), user_id),
+        )
 
     return {
         "id": user_id,

@@ -1,9 +1,6 @@
 # services.py
 
-
-from datetime import datetime, UTC
-
-from database import fetch_all, execute_sql, now_iso
+from database import fetch_all, now_iso
 from validators import validar_regla_coordinacion, validar_dias_asistencia
 
 
@@ -23,29 +20,63 @@ def get_stats(conn):
 
 
 # -------------------- PREVIEW --------------------
+
 def preview_next_patient(conn, specialty_filter, subspecialty_filter):
-    _, rows = fetch_all(conn, """
-        SELECT id, patient_id, priority_level, specialty, subspecialty, request_date
-        FROM waitlist
-        WHERE status='EN_ESPERA'
-        ORDER BY request_date ASC
-        LIMIT 1
-    """)
+    conditions = [
+        "status = 'EN_ESPERA'",
+        "eligible = TRUE",
+    ]
+    params = []
+
+    if specialty_filter and specialty_filter != "Todas":
+        conditions.append("specialty = %s")
+        params.append(specialty_filter)
+
+    if subspecialty_filter and subspecialty_filter != "Todas":
+        conditions.append("subspecialty = %s")
+        params.append(subspecialty_filter)
+
+    query = f"""
+            SELECT
+                id,
+                patient_id,
+                priority_level,
+                specialty,
+                subspecialty,
+                request_date,
+                FLOOR(
+                    EXTRACT(EPOCH FROM (NOW() - request_date)) / 86400
+                )::INTEGER AS wait_days
+            FROM waitlist
+            WHERE {" AND ".join(conditions)}
+            ORDER BY
+                CASE priority_level
+                    WHEN 'urgente' THEN 1
+                    WHEN 'preferente' THEN 2
+                    WHEN 'ordinario' THEN 3
+                    ELSE 4
+                END,
+                request_date ASC,
+                id ASC
+            LIMIT 1
+        """
+
+    _, rows = fetch_all(conn, query, tuple(params))
 
     if not rows:
         return None
 
-    r = rows[0]
+    row = rows[0]
 
     return {
-        "waitlist_id": r[0],
-        "patient_id": r[1],
-        "priority_level": r[2],
-        "specialty": r[3],
-        "subspecialty": r[4],
-        "request_date": str(r[5]),
-        "wait_days": 0,
-        "rule_applied": "BÁSICO"
+        "waitlist_id": row[0],
+        "patient_id": row[1],
+        "priority_level": row[2],
+        "specialty": row[3],
+        "subspecialty": row[4],
+        "request_date": str(row[5]),
+        "wait_days": int(row[6]),
+        "rule_applied": "prioridad_y_antigüedad",
     }
 
 
@@ -66,31 +97,79 @@ def add_waiting_patient_multiple(
 ):
     now = now_iso()
 
-    with conn.cursor() as cur:
-        for req in requests:
-            cur.execute("""
-                INSERT INTO waitlist (
-                    patient_id, priority_level, specialty, subspecialty,
-                    prescribed_sessions, slot_type, time_preference,
-                    transport_mode, preferred_hour, coordination_rule,
-                    request_date, created_at, status, eligible
-                )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'EN_ESPERA',%s)
-            """, (
-                patient_id,
-                priority_level,
-                req["specialty"],
-                req["subspecialty"],
-                req["prescribed_sessions"],
-                slot_type,
-                time_preference,
-                transport_mode,
-                preferred_hour,
-                coordination_rule,
-                request_date_iso,
-                now,
-                eligible
-            ))
+    with conn.transaction():
+        with conn.cursor() as cur:
+            for req in requests:
+                cur.execute("""
+                    INSERT INTO waitlist (
+                        patient_id,
+                        priority_level,
+                        specialty,
+                        subspecialty,
+                        prescribed_sessions,
+                        slot_type,
+                        time_preference,
+                        transport_mode,
+                        preferred_hour,
+                        coordination_rule,
+                        request_date,
+                        created_at,
+                        status,
+                        eligible
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, 'EN_ESPERA', %s
+                    )
+                    RETURNING id
+                """, (
+                    patient_id,
+                    priority_level,
+                    req["specialty"],
+                    req["subspecialty"],
+                    req["prescribed_sessions"],
+                    slot_type,
+                    time_preference,
+                    transport_mode,
+                    preferred_hour,
+                    coordination_rule,
+                    request_date_iso,
+                    now,
+                    eligible,
+                ))
+
+                waitlist_id = cur.fetchone()[0]
+
+                cur.execute("""
+                    INSERT INTO assignment_log (
+                        event,
+                        waitlist_id,
+                        rehab_active_id,
+                        patient_id,
+                        specialty,
+                        subspecialty,
+                        chosen_priority_level,
+                        wait_days,
+                        rule_applied,
+                        reason,
+                        comment,
+                        actor,
+                        created_at
+                    )
+                    VALUES (
+                        'CREACION_SOLICITUD',
+                        %s, NULL, %s, %s, %s, %s, NULL, NULL,
+                        'SOLICITUD_CREADA', NULL, %s, %s
+                    )
+                """, (
+                    waitlist_id,
+                    patient_id,
+                    req["specialty"],
+                    req["subspecialty"],
+                    priority_level,
+                    actor,
+                    now,
+                ))
 
 
 # -------------------- ASSIGN --------------------
@@ -104,78 +183,182 @@ def assign_next_patient(
     subspecialty_filter,
     attendance_days
 ):
-    now = now_iso()
+    error_dias = validar_dias_asistencia(attendance_days)
+    if error_dias:
+        raise ValueError(error_dias)
 
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT
-                id,
-                patient_id,
-                priority_level,
-                specialty,
-                subspecialty,
-                FLOOR(EXTRACT(EPOCH FROM (%s::timestamptz - request_date)) / 86400)::INTEGER AS wait_days
-            FROM waitlist
-            WHERE status = 'EN_ESPERA'
-            ORDER BY request_date ASC
-            LIMIT 1
-        """, (now,))
-        row = cur.fetchone()
+    conditions = [
+        "status = 'EN_ESPERA'",
+        "eligible = TRUE",
+    ]
+    params = []
+
+    if specialty_filter and specialty_filter != "Todas":
+        conditions.append("specialty = %s")
+        params.append(specialty_filter)
+
+    if subspecialty_filter and subspecialty_filter != "Todas":
+        conditions.append("subspecialty = %s")
+        params.append(subspecialty_filter)
+
+    query = f"""
+        SELECT
+            id,
+            patient_id,
+            priority_level,
+            specialty,
+            subspecialty,
+            prescribed_sessions,
+            slot_type,
+            time_preference,
+            transport_mode,
+            preferred_hour,
+            coordination_rule,
+            FLOOR(
+                EXTRACT(EPOCH FROM (NOW() - request_date)) / 86400
+            )::INTEGER AS wait_days
+        FROM waitlist
+        WHERE {" AND ".join(conditions)}
+        ORDER BY
+            CASE priority_level
+                WHEN 'urgente' THEN 1
+                WHEN 'preferente' THEN 2
+                WHEN 'ordinario' THEN 3
+                ELSE 4
+            END,
+            request_date ASC,
+            id ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    """
+
+    now = now_iso()
+    rule_applied = "prioridad_y_antigüedad"
+
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
 
         if not row:
             return None
 
-        waitlist_id, patient_id, priority_level, specialty, subspecialty, wait_days = row
+        (
+            waitlist_id,
+            patient_id,
+            priority_level,
+            specialty,
+            subspecialty,
+            prescribed_sessions,
+            slot_type,
+            time_preference,
+            transport_mode,
+            preferred_hour,
+            coordination_rule,
+            wait_days,
+        ) = row
 
         error = validar_regla_coordinacion(
             conn,
             patient_id,
             specialty,
             attendance_days,
-            "NINGUNA"
+            coordination_rule or "NINGUNA",
         )
 
         if error:
             raise ValueError(error)
 
-        cur.execute("""
-            INSERT INTO rehab_active (
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO rehab_active (
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    prescribed_sessions,
+                    slot_type,
+                    time_preference,
+                    transport_mode,
+                    preferred_hour,
+                    coordination_rule,
+                    attendance_days,
+                    start_date,
+                    source_waitlist_id,
+                    assigned_by,
+                    assigned_at,
+                    assigned_clinician_dni,
+                    assigned_clinician_name,
+                    assigned_clinician_profession,
+                    status
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVO'
+                )
+                RETURNING id
+            """, (
                 patient_id,
                 specialty,
                 subspecialty,
-                attendance_days,
-                start_date,
-                source_waitlist_id,
+                prescribed_sessions,
+                slot_type,
+                time_preference,
+                transport_mode,
+                preferred_hour,
+                coordination_rule,
+                ",".join(attendance_days),
+                now,
+                waitlist_id,
                 assigned_by,
-                assigned_at,
+                now,
                 assigned_clinician_dni,
                 assigned_clinician_name,
                 assigned_clinician_profession,
-                status
-            )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVO')
-            RETURNING id
-        """, (
-            patient_id,
-            specialty,
-            subspecialty,
-            ",".join(attendance_days),
-            now,
-            waitlist_id,
-            assigned_by,
-            now,
-            assigned_clinician_dni,
-            assigned_clinician_name,
-            assigned_clinician_profession,
-        ))
+            ))
 
-        rehab_id = cur.fetchone()[0]
+            rehab_id = cur.fetchone()[0]
 
-        cur.execute("""
-            UPDATE waitlist
-            SET status = 'ASIGNADO'
-            WHERE id = %s
-        """, (waitlist_id,))
+            cur.execute("""
+                UPDATE waitlist
+                SET status = 'ASIGNADO'
+                WHERE id = %s
+                  AND status = 'EN_ESPERA'
+                  AND eligible = TRUE
+            """, (waitlist_id,))
+
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event,
+                    waitlist_id,
+                    rehab_active_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    chosen_priority_level,
+                    wait_days,
+                    rule_applied,
+                    reason,
+                    comment,
+                    actor,
+                    created_at
+                )
+                VALUES (
+                    'ASIGNACION_AUTOMATICA',
+                    %s, %s, %s, %s, %s, %s, %s, %s,
+                    'ASIGNACION', NULL, %s, %s
+                )
+            """, (
+                waitlist_id,
+                rehab_id,
+                patient_id,
+                specialty,
+                subspecialty,
+                priority_level,
+                wait_days,
+                rule_applied,
+                assigned_by,
+                now,
+            ))
 
     return {
         "rehab_id": rehab_id,
@@ -188,7 +371,7 @@ def assign_next_patient(
         "assigned_clinician_name": assigned_clinician_name,
         "assigned_clinician_profession": assigned_clinician_profession,
         "wait_days": int(wait_days),
-        "rule_applied": "orden_por_fecha",
+        "rule_applied": rule_applied,
     }
 
 
@@ -196,14 +379,72 @@ def assign_next_patient(
 def discharge_patient(conn, rehab_active_id, reason, comment, actor):
     now = now_iso()
 
-    execute_sql(conn, """
-        UPDATE rehab_active
-        SET status='ALTA',
-            discharge_reason=%s,
-            discharge_comment=%s,
-            discharged_at=%s
-        WHERE id=%s
-    """, (reason, comment, now, rehab_active_id))
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    ra.patient_id,
+                    ra.specialty,
+                    ra.subspecialty,
+                    ra.source_waitlist_id,
+                    w.priority_level
+                FROM rehab_active AS ra
+                LEFT JOIN waitlist AS w
+                    ON w.id = ra.source_waitlist_id
+                WHERE ra.id = %s
+                  AND ra.status = 'ACTIVO'
+                FOR UPDATE OF ra
+            """, (rehab_active_id,))
+
+            row = cur.fetchone()
+
+            if not row:
+                return False
+
+            patient_id, specialty, subspecialty, waitlist_id, priority_level = row
+
+            cur.execute("""
+                UPDATE rehab_active
+                SET status = 'ALTA',
+                    discharge_reason = %s,
+                    discharge_comment = %s,
+                    discharged_at = %s
+                WHERE id = %s
+            """, (reason, comment, now, rehab_active_id))
+
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event,
+                    waitlist_id,
+                    rehab_active_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    chosen_priority_level,
+                    wait_days,
+                    rule_applied,
+                    reason,
+                    comment,
+                    actor,
+                    created_at
+                )
+                VALUES (
+                    'ALTA_TRATAMIENTO',
+                    %s, %s, %s, %s, %s, %s,
+                    NULL, NULL, %s, %s, %s, %s
+                )
+            """, (
+                waitlist_id,
+                rehab_active_id,
+                patient_id,
+                specialty,
+                subspecialty,
+                priority_level,
+                reason,
+                comment,
+                actor,
+                now,
+            ))
 
     return True
 
@@ -403,16 +644,17 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
 def generate_clinical_followup_report(conn, rehab_active_id: int):
     summary = get_clinical_followup_summary(conn, rehab_active_id)
 
-    texto = []
-    texto.append("INFORME AUTOMÁTICO DE SEGUIMIENTO CLÍNICO")
-    texto.append("")
-    texto.append(f"Sesiones registradas: {summary['total_sessions']}")
-    texto.append(f"Sesiones realizadas: {summary['realizadas']}")
-    texto.append(f"Revisiones: {summary['revisiones']}")
-    texto.append(f"Faltas justificadas: {summary['faltas_justificadas']}")
-    texto.append(f"Faltas no justificadas: {summary['faltas_no_justificadas']}")
-    texto.append(f"Adherencia estimada: {summary['adherence_percent']}%")
-    texto.append("")
+    texto = [
+        "INFORME AUTOMÁTICO DE SEGUIMIENTO CLÍNICO",
+        "",
+        f"Sesiones registradas: {summary['total_sessions']}",
+        f"Sesiones realizadas: {summary['realizadas']}",
+        f"Revisiones: {summary['revisiones']}",
+        f"Faltas justificadas: {summary['faltas_justificadas']}",
+        f"Faltas no justificadas: {summary['faltas_no_justificadas']}",
+        f"Adherencia estimada: {summary['adherence_percent']}%",
+        "",
+    ]
 
     if summary["first_pain"] is not None and summary["last_pain"] is not None:
         texto.append(
@@ -476,24 +718,67 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
     with conn.transaction():
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, patient_id, specialty, subspecialty, priority_level
+                SELECT
+                    id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    priority_level,
+                    status
                 FROM waitlist
                 WHERE id = %s
+                FOR UPDATE
             """, (waitlist_id,))
+
             row = cur.fetchone()
 
             if not row:
                 return False, "La solicitud no existe."
 
-            _, patient_id, specialty, subspecialty, priority_level = row
+            (
+                _,
+                patient_id,
+                specialty,
+                subspecialty,
+                priority_level,
+                status,
+            ) = row
+
+            if status != "EN_ESPERA":
+                return False, "No se puede eliminar una solicitud que ya ha sido asignada."
 
             cur.execute("""
-                INSERT INTO assignment_log
-                    (event, waitlist_id, rehab_active_id, patient_id, specialty, subspecialty,
-                     chosen_priority_level, wait_days, rule_applied, reason, comment, actor, created_at)
-                VALUES
-                    ('ELIMINACION_ADMIN_LISTA_ESPERA', %s, NULL, %s, %s, %s, %s, NULL, NULL,
-                     'ELIMINADO_POR_ADMIN', 'Registro eliminado por administrador', %s, %s)
+                DELETE FROM waitlist
+                WHERE id = %s
+                  AND status = 'EN_ESPERA'
+            """, (waitlist_id,))
+
+            if cur.rowcount != 1:
+                return False, "No se pudo eliminar la solicitud."
+
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event,
+                    waitlist_id,
+                    rehab_active_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    chosen_priority_level,
+                    wait_days,
+                    rule_applied,
+                    reason,
+                    comment,
+                    actor,
+                    created_at
+                )
+                VALUES (
+                    'ELIMINACION_ADMIN_LISTA_ESPERA',
+                    %s, NULL, %s, %s, %s, %s, NULL, NULL,
+                    'ELIMINADO_POR_ADMIN',
+                    'Registro eliminado por administrador',
+                    %s, %s
+                )
             """, (
                 waitlist_id,
                 patient_id,
@@ -501,16 +786,10 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
                 subspecialty,
                 priority_level,
                 actor,
-                now
+                now,
             ))
 
-            cur.execute("""
-                DELETE FROM waitlist
-                WHERE id = %s
-            """, (waitlist_id,))
-
     return True, "Solicitud eliminada correctamente."
-
 
 def delete_active_treatment(conn, rehab_active_id: int, actor: str):
     """
