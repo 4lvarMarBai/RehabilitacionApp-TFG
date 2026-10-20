@@ -1,8 +1,11 @@
 # app.py
 
 import calendar
-import os
 from datetime import date, time
+
+import logging
+import tomllib
+import psycopg
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -18,17 +21,14 @@ from config import (
     REGLAS_COORDINACION,
 )
 from database import get_conn, init_db, fetch_all, iso_utc_from_date, now_iso
-import database
 from catalogos import (
     get_especialidades,
     get_nombres_especialidades,
     specialty_requires_subspecialty,
-    get_areas_por_especialidad,
     get_nombres_areas_por_especialidad,
     add_specialty_config,
     add_subspecialty_config,
     set_specialty_active,
-    set_subspecialty_active,
 )
 from validators import (
     is_valid_dni,
@@ -117,8 +117,19 @@ try:
     init_db(conn)
     init_auth_db(conn)
     ensure_admin_user(conn)
-except Exception as e:
-    st.error(f"Error conectando con la base de datos en la nube: {e}")
+except (
+    psycopg.Error,
+    RuntimeError,
+    OSError,
+    tomllib.TOMLDecodeError,
+):
+    logging.exception(
+        "Error al conectar con la base de datos o inicializar la aplicación."
+    )
+    st.error(
+        "No se pudo conectar o inicializar la base de datos. "
+        "Revisa la configuración y los registros de la terminal."
+    )
     st.stop()
 
 # Inicio de sesión
@@ -144,7 +155,6 @@ if st.session_state["user"] is None:
         else:
             st.error("Usuario o contraseña incorrectos.")
 
-    st.info("Usuario inicial administrador: admin · Contraseña inicial: Admin1234")
     st.stop()
 
 # Cambio obligatorio de contraseña
@@ -1259,6 +1269,7 @@ elif page == "⚙️ Ajustes":
         _, waitlist_rows = fetch_all(conn, """
                 SELECT id, patient_id, specialty, subspecialty, priority_level, request_date
                 FROM waitlist
+                WHERE status = 'EN_ESPERA'
                 ORDER BY id DESC
                 LIMIT 300
             """)
@@ -1386,7 +1397,7 @@ elif page == "⚙️ Ajustes":
                     st.error("Ya existe un usuario registrado con ese DNI.")
 
                 else:
-                    create_user(
+                    creado = create_user(
                         conn=conn,
                         username=new_username.strip(),
                         full_name=new_full_name.strip(),
@@ -1394,8 +1405,11 @@ elif page == "⚙️ Ajustes":
                         profession=new_profession,
                         role=new_role
                     )
-                    st.success("Usuario registrado correctamente.")
-                    st.rerun()
+                    if creado:
+                        st.success("Usuario registrado correctamente.")
+                        st.rerun()
+                    else:
+                        st.error("Ya existe ese nombre de usuario o DNI.")
 
     st.markdown("### Listado de usuarios")
     usuarios = get_all_users(conn)
@@ -1515,5 +1529,3 @@ elif page == "⚙️ Ajustes":
                 "activa": "Sí" if active else "No",
             })
         st.dataframe(data_areas, width="stretch", hide_index=True)
-
-st.caption("Consejo: guarda las credenciales en Secrets y no dentro del código.")
