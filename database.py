@@ -163,6 +163,7 @@ def init_db(conn):
             event TEXT NOT NULL,
             waitlist_id BIGINT,
             rehab_active_id BIGINT,
+            session_id BIGINT,
             patient_id TEXT NOT NULL,
             specialty TEXT,
             subspecialty TEXT,
@@ -196,6 +197,7 @@ def init_db(conn):
 
         cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS discharge_comment TEXT;")
         cur.execute("ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS comment TEXT;")
+        cur.execute("ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS session_id BIGINT;")
         cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;")
         cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;")
         cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS attendance_days TEXT;")

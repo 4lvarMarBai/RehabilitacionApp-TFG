@@ -1,11 +1,5 @@
 PRIORIDADES = ["urgente", "preferente", "ordinario"]
 
-DIAS_2_MESES = 60
-DIAS_3_MESES = 90
-DIAS_6_MESES = 183
-
-CLAVE_CONFIGURACION = "admin123"
-
 OPCIONES_ASISTENCIA = {
     "LXV": ["Lunes", "Miércoles", "Viernes"],
     "MJ": ["Martes", "Jueves"],

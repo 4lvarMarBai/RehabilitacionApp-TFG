@@ -29,6 +29,7 @@ from catalogos import (
     add_specialty_config,
     add_subspecialty_config,
     set_specialty_active,
+    set_subspecialty_active,
 )
 from validators import (
     is_valid_dni,
@@ -76,9 +77,17 @@ from auth import (
     PASSWORD_TEMPORAL_POR_DEFECTO,
 )
 
-# ============================================================
-# 1. CONFIGURACIÓN Y CATÁLOGOS
-# ============================================================
+@st.cache_resource
+def inicializar_aplicacion():
+    conexion = get_conn()
+    init_db(conexion)
+    init_auth_db(conexion)
+    ensure_admin_user(conexion)
+    return conexion
+
+
+
+
 
 st.set_page_config(
     page_title="Gestión de Rehabilitación",
@@ -113,10 +122,7 @@ st.markdown("""
 
 # Conexión e inicialización de la base de datos PostgreSQL
 try:
-    conn = get_conn()
-    init_db(conn)
-    init_auth_db(conn)
-    ensure_admin_user(conn)
+    conn = inicializar_aplicacion()
 except (
     psycopg.Error,
     RuntimeError,
@@ -243,7 +249,9 @@ specialty_filter = st.sidebar.selectbox(
     key="sidebar_specialty_filter"
 )
 
+specialty_filter = specialty_filter or "Todas"
 subspecialty_filter = "Todas"
+
 if specialty_filter != "Todas" and specialty_requires_subspecialty(conn, specialty_filter):
     areas_sidebar = get_nombres_areas_por_especialidad(conn, specialty_filter, only_active=True)
     subspecialty_filter = st.sidebar.selectbox(
@@ -1501,6 +1509,37 @@ elif page == "⚙️ Ajustes":
                 else:
                     add_subspecialty_config(conn, especialidad_destino, nueva_area)
                     st.success("Área guardada.")
+                    st.rerun()
+
+        st.markdown("### Activar o desactivar áreas")
+
+        _, areas_configuradas = fetch_all(conn, """
+                    SELECT specialty_name, name, active
+                    FROM subspecialties_config
+                    ORDER BY specialty_name ASC, name ASC
+                """)
+
+        for especialidad, area, activa in areas_configuradas:
+            col_nombre, col_estado = st.columns([3, 1])
+
+            with col_nombre:
+                st.write(f"**{especialidad} — {area}**")
+
+            with col_estado:
+                nuevo_estado = st.toggle(
+                    "Activa",
+                    value=activa,
+                    key=f"toggle_area_{especialidad}_{area}",
+                    label_visibility="collapsed",
+                )
+
+                if nuevo_estado != activa:
+                    set_subspecialty_active(
+                        conn,
+                        especialidad,
+                        area,
+                        nuevo_estado,
+                    )
                     st.rerun()
 
     with tab3:

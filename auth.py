@@ -84,14 +84,31 @@ def init_auth_db(conn):
 def create_user(conn, username: str, full_name: str, dni: str, profession: str, role: str):
     password_hash = hash_password(PASSWORD_TEMPORAL_POR_DEFECTO)
 
-    execute_sql(conn, """
-        INSERT INTO users (
-            username, full_name, dni, profession, password_hash, role,
-            must_change_password, active
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, TRUE, TRUE)
-        ON CONFLICT (username) DO NOTHING
-    """, (username, full_name, dni, profession, password_hash, role))
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO users (
+                username,
+                full_name,
+                dni,
+                profession,
+                password_hash,
+                role,
+                must_change_password,
+                active
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, TRUE, TRUE)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+        """, (
+            username,
+            full_name,
+            dni,
+            profession,
+            password_hash,
+            role,
+        ))
+
+        return cur.fetchone() is not None
 
 
 def ensure_admin_user(conn):
@@ -151,6 +168,13 @@ def authenticate_user(conn, username: str, password: str):
         return None
 
     if not verify_password(password, password_hash):
+        execute_sql(
+            conn,
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(password), user_id),
+        )
+
+    if not password_hash.startswith(PASSWORD_HASH_PREFIX):
         execute_sql(
             conn,
             "UPDATE users SET password_hash = %s WHERE id = %s",
