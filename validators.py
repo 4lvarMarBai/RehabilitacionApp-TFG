@@ -1,4 +1,5 @@
 import re
+from config import FISIO_ESPECIALIDADES
 
 # -------------------- Validaciones básicas --------------------
 
@@ -30,7 +31,7 @@ def is_valid_nhc(nhc: str) -> bool:
 # -------------------- Lógica clínica --------------------
 
 def es_fisio(specialty: str) -> bool:
-    return specialty in ["Electroterapia", "Cinesiterapia"]
+    return specialty in FISIO_ESPECIALIDADES
 
 
 def hay_fisio_y_terapia_ocupacional(selected_specialties: list[str]) -> bool:

@@ -775,7 +775,7 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
                 VALUES (
                     'ELIMINACION_ADMIN_LISTA_ESPERA',
                     %s, NULL, %s, %s, %s, %s, NULL, NULL,
-                    'ELIMINADO_POR_ADMIN',
+                    'DESACTIVADO_POR_ADMIN',
                     'Registro eliminado por administrador',
                     %s, %s
                 )
@@ -812,12 +812,14 @@ def delete_active_treatment(conn, rehab_active_id: int, actor: str):
 
             _, patient_id, specialty, subspecialty = row
 
+            # Registrar la eliminación del tratamiento.
+
             cur.execute("""
                 INSERT INTO assignment_log
                     (event, waitlist_id, rehab_active_id, patient_id, specialty, subspecialty,
                      chosen_priority_level, wait_days, rule_applied, reason, comment, actor, created_at)
                 VALUES
-                    ('ELIMINACION_ADMIN_TRATAMIENTO', NULL, %s, %s, %s, %s, NULL, NULL, NULL,
+                    ('DESACTIVACION_ADMIN_TRATAMIENTO', NULL, %s, %s, %s, %s, NULL, NULL, NULL,
                      'ELIMINADO_POR_ADMIN', 'Tratamiento eliminado por administrador', %s, %s)
             """, (
                 rehab_active_id,
@@ -828,13 +830,50 @@ def delete_active_treatment(conn, rehab_active_id: int, actor: str):
                 now
             ))
 
+            # Obtener y registrar las sesiones que se eliminarán.
             cur.execute("""
-                DELETE FROM treatment_sessions
+                SELECT id, patient_id, specialty, subspecialty, status
+                FROM treatment_sessions
                 WHERE rehab_active_id = %s
             """, (rehab_active_id,))
+            sesiones = cur.fetchall()
+
+            for session_id, session_patient_id, session_specialty, session_subspecialty, session_status in sesiones:
+                cur.execute("""
+                    INSERT INTO assignment_log (
+                        event,
+                        waitlist_id,
+                        rehab_active_id,
+                        session_id,
+                        patient_id,
+                        specialty,
+                        subspecialty,
+                        reason,
+                        comment,
+                        actor,
+                        created_at
+                    )
+                    VALUES (
+                        'ELIMINACION_SESION',
+                        NULL, %s, %s, %s, %s, %s,
+                        %s, 'Sesión eliminada al eliminar el tratamiento', %s, %s
+                    )
+                """, (
+                    rehab_active_id,
+                    session_id,
+                    session_patient_id,
+                    session_specialty,
+                    session_subspecialty,
+                    session_status,
+                    actor,
+                    now,
+                ))
+
+            # Eliminar las sesiones y después el tratamiento.
 
             cur.execute("""
-                DELETE FROM rehab_active
+                UPDATE rehab_active
+                SET status = 'ELIMINADO_ADMIN'
                 WHERE id = %s
             """, (rehab_active_id,))
 
