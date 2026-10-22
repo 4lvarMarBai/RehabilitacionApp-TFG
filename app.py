@@ -2,6 +2,7 @@
 
 import calendar
 from datetime import date, time
+from psycopg_pool import PoolTimeout
 
 import logging
 import tomllib
@@ -20,7 +21,7 @@ from config import (
     HORAS_AMBULANCIA,
     REGLAS_COORDINACION,
 )
-from database import get_conn, init_db, fetch_all, iso_utc_from_date, now_iso
+from database import get_pool,get_conn, init_db, fetch_all, iso_utc_from_date, now_iso
 from catalogos import (
     get_especialidades,
     get_nombres_especialidades,
@@ -79,15 +80,11 @@ from auth import (
 
 @st.cache_resource
 def inicializar_aplicacion():
-    conexion = get_conn()
-    init_db(conexion)
-    init_auth_db(conexion)
-    ensure_admin_user(conexion)
-    return conexion
-
-
-
-
+    with get_pool().connection() as conexion:
+        init_db(conexion)
+        init_auth_db(conexion)
+        ensure_admin_user(conexion)
+    return True
 
 st.set_page_config(
     page_title="Gestión de Rehabilitación",
@@ -122,9 +119,11 @@ st.markdown("""
 
 # Conexión e inicialización de la base de datos PostgreSQL
 try:
-    conn = inicializar_aplicacion()
+    inicializar_aplicacion()
+    conn = get_conn()
 except (
     psycopg.Error,
+    PoolTimeout,
     RuntimeError,
     OSError,
     tomllib.TOMLDecodeError,
@@ -266,19 +265,31 @@ st.sidebar.markdown(f"**DNI:** {actor_sidebar}")
 st.sidebar.markdown(f"**Profesión:** {profesion_usuario}")
 st.sidebar.markdown(f"**Rol:** {rol_usuario}")
 
-if st.sidebar.button("Cerrar sesión", key="logout_button"):
-    st.session_state["user"] = None
-    st.rerun()
-
 # -------------------- Cabecera --------------------
 
 waiting, active, discharged = get_stats(conn)
 
-st.markdown('<div class="title">Sistema de Gestión de Rehabilitación</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="muted">Gestión clínica de solicitudes, tratamientos, auditoría y ajustes de configuración</div>',
-    unsafe_allow_html=True
+col_titulo, col_cerrar = st.columns(
+    [8, 1.5],
+    vertical_alignment="center",
 )
+
+with col_titulo:
+    st.markdown('<div class="title">Sistema de Gestión de Rehabilitación</div>',unsafe_allow_html=True,)
+    st.markdown( '<div class="muted">Gestión clínica de solicitudes, tratamientos, auditoría y ajustes de configuración</div>'
+                 ,unsafe_allow_html=True,)
+
+with col_cerrar:
+    if st.button(
+        "🚫 Cerrar sesión",
+        key="logout_button_sidebar",
+        width="stretch",
+    ):
+        st.session_state["user"] = None
+        st.session_state.pop("login_username", None)
+        st.session_state.pop("login_password", None)
+        st.rerun()
+
 st.write("")
 
 c1, c2, c3, c4 = st.columns([1, 1, 1, 2], gap="large")
@@ -493,7 +504,25 @@ elif page == "📝 Nueva solicitud":
         ).strip()
 
     with c2:
-        priority_level = st.selectbox("Prioridad", PRIORIDADES, key="req_priority")
+        solicita_personal_sacyl = st.checkbox(
+            "El paciente, como personal SACYL, solicita acogerse a esta prioridad",
+            key="req_personal_sacyl",
+        )
+
+        if solicita_personal_sacyl:
+            priority_level = "personal SACYl"
+            st.caption("Se registrará con la máxima prioridad.")
+        else:
+            prioridades_normales = [
+                prioridad
+                for prioridad in PRIORIDADES
+                if prioridad != "personal SACYL"
+            ]
+            priority_level = st.selectbox(
+                "Prioridad",
+                prioridades_normales,
+                key="req_priority",
+            )
 
     with c3:
         request_dt = st.date_input("Fecha de solicitud", value=date.today(), key="req_request_date")

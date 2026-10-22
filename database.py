@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, UTC, date, time
-
+from psycopg_pool import ConnectionPool
 from pathlib import Path
 import tomllib
 
@@ -33,10 +33,27 @@ def get_database_url() -> str:
     return db_url
 
 
+def _devolver_conexion(conn):
+    get_pool().putconn(conn)
+
+
 @st.cache_resource
+def get_pool():
+    pool = ConnectionPool(
+        conninfo=get_database_url(),
+        min_size=1,
+        max_size=10,
+        timeout=30,
+        kwargs={"autocommit": True},
+        open=True,
+    )
+    pool.wait(timeout=30)
+    return pool
+
+
+@st.cache_resource(scope="session", on_release=_devolver_conexion)
 def get_conn():
-    conn = psycopg.connect(get_database_url(), autocommit=True)
-    return conn
+    return get_pool().getconn(timeout=30)
 
 
 def fetch_all(conn, query, params=()):
@@ -113,7 +130,7 @@ def init_db(conn):
         CREATE TABLE IF NOT EXISTS waitlist (
             id BIGSERIAL PRIMARY KEY,
             patient_id TEXT NOT NULL,
-            priority_level TEXT NOT NULL CHECK(priority_level IN ('urgente','preferente','ordinario')),
+            priority_level TEXT NOT NULL CHECK(priority_level IN ('personal SACYL', 'urgente','preferente','ordinario')),
             specialty TEXT NOT NULL,
             subspecialty TEXT,
             prescribed_sessions INTEGER,
@@ -127,6 +144,24 @@ def init_db(conn):
             status TEXT NOT NULL DEFAULT 'EN_ESPERA',
             eligible BOOLEAN NOT NULL DEFAULT TRUE
         );
+        """)
+
+        cur.execute("""
+            ALTER TABLE waitlist
+            DROP CONSTRAINT IF EXISTS waitlist_priority_level_check;
+        """)
+
+        cur.execute("""
+            ALTER TABLE waitlist
+            ADD CONSTRAINT waitlist_priority_level_check
+            CHECK (
+                priority_level IN (
+                    'personal SACYL',
+                    'urgente',
+                    'preferente',
+                    'ordinario'
+                )
+            );
         """)
 
         cur.execute("""

@@ -168,11 +168,7 @@ def authenticate_user(conn, username: str, password: str):
         return None
 
     if not verify_password(password, password_hash):
-        execute_sql(
-            conn,
-            "UPDATE users SET password_hash = %s WHERE id = %s",
-            (hash_password(password), user_id),
-        )
+        return None
 
     if not password_hash.startswith(PASSWORD_HASH_PREFIX):
         execute_sql(
