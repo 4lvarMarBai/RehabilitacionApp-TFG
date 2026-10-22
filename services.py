@@ -51,10 +51,11 @@ def preview_next_patient(conn, specialty_filter, subspecialty_filter):
             WHERE {" AND ".join(conditions)}
             ORDER BY
                 CASE priority_level
-                    WHEN 'urgente' THEN 1
-                    WHEN 'preferente' THEN 2
-                    WHEN 'ordinario' THEN 3
-                    ELSE 4
+                    WHEN 'personal SACYl' THEN 1
+                    WHEN 'urgente' THEN 2
+                    WHEN 'preferente' THEN 3
+                    WHEN 'ordinario' THEN 4
+                    ELSE 5
                 END,
                 request_date ASC,
                 id ASC
@@ -221,10 +222,11 @@ def assign_next_patient(
         WHERE {" AND ".join(conditions)}
         ORDER BY
             CASE priority_level
-                WHEN 'urgente' THEN 1
-                WHEN 'preferente' THEN 2
-                WHEN 'ordinario' THEN 3
-                ELSE 4
+                WHEN 'personal SACYl' THEN 1
+                WHEN 'urgente' THEN 2
+                WHEN 'preferente' THEN 3
+                WHEN 'ordinario' THEN 4
+                ELSE 5
             END,
             request_date ASC,
             id ASC

@@ -5,6 +5,8 @@ from database import fetch_all
 
 
 def priority_badge(p: str) -> str:
+    if p == "Personal SACYL":
+        return "🟣 Personal SACYL"
     if p == "urgente":
         return "🔴 urgente"
     if p == "preferente":

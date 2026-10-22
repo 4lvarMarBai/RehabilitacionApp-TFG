@@ -1,4 +1,4 @@
-PRIORIDADES = ["urgente", "preferente", "ordinario"]
+PRIORIDADES = ["urgente", "preferente", "ordinario", "personal SACYl"]
 
 OPCIONES_ASISTENCIA = {
     "LXV": ["Lunes", "Miércoles", "Viernes"],
