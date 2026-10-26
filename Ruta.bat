@@ -1,3 +1,3 @@
 cd /d "C:\Users\Alvar Martinez\Desktop\TFG\RehabilitacionApp-TFG"
-python -m streamlit run app.py
+.\.venv\Scripts\python.exe -m streamlit run "C:\Users\Alvar Martinez\Desktop\TFG\RehabilitacionApp-TFG\app.py"
 pause

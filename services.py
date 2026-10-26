@@ -2,6 +2,7 @@
 
 from database import fetch_all, now_iso
 from validators import validar_regla_coordinacion, validar_dias_asistencia
+from ai_clinical import resumir_informes
 
 
 # -------------------- STATS --------------------
@@ -51,7 +52,7 @@ def preview_next_patient(conn, specialty_filter, subspecialty_filter):
             WHERE {" AND ".join(conditions)}
             ORDER BY
                 CASE priority_level
-                    WHEN 'personal SACYl' THEN 1
+                    WHEN 'personal SACYL' THEN 1
                     WHEN 'urgente' THEN 2
                     WHEN 'preferente' THEN 3
                     WHEN 'ordinario' THEN 4
@@ -94,12 +95,53 @@ def add_waiting_patient_multiple(
     time_preference,
     transport_mode,
     preferred_hour,
-    coordination_rule
+    coordination_rule,
+    ai_consent_accepted: bool | None = None,
 ):
+    if ai_consent_accepted is None:
+        raise ValueError("Debe registrarse la decisión del paciente sobre el uso de IA.")
+
     now = now_iso()
 
     with conn.transaction():
         with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO patient_ai_consent (
+                    patient_id, accepted, decided_at, decided_by, consent_version
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (patient_id) DO UPDATE SET
+                    accepted = EXCLUDED.accepted,
+                    decided_at = EXCLUDED.decided_at,
+                    decided_by = EXCLUDED.decided_by,
+                    consent_version = EXCLUDED.consent_version
+            """, (
+                patient_id,
+                ai_consent_accepted,
+                now,
+                actor,
+                "software-v1",
+            ))
+
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event, patient_id, reason, comment, actor, created_at
+                )
+                VALUES (
+                    'CONSENTIMIENTO_IA',
+                    %s,
+                    'DECISION_CONSENTIMIENTO_IA',
+                    %s,
+                    %s,
+                    %s
+                )
+            """, (
+                patient_id,
+                "ACEPTADO" if ai_consent_accepted else "RECHAZADO",
+                actor,
+                now,
+            ))
+
             for req in requests:
                 cur.execute("""
                     INSERT INTO waitlist (
@@ -222,7 +264,7 @@ def assign_next_patient(
         WHERE {" AND ".join(conditions)}
         ORDER BY
             CASE priority_level
-                WHEN 'personal SACYl' THEN 1
+                WHEN 'personal SACYL' THEN 1
                 WHEN 'urgente' THEN 2
                 WHEN 'preferente' THEN 3
                 WHEN 'ordinario' THEN 4
@@ -689,6 +731,124 @@ def generate_clinical_followup_report(conn, rehab_active_id: int):
         texto.append("No se detectan signos claros de estancamiento funcional.")
 
     return "\n".join(texto)
+
+def get_patient_ai_consent(conn, patient_id: str) -> bool | None:
+    _, rows = fetch_all(conn, """
+        SELECT accepted
+        FROM patient_ai_consent
+        WHERE patient_id = %s
+    """, (patient_id,))
+    return None if not rows else bool(rows[0][0])
+
+
+def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
+    now = now_iso()
+
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO patient_ai_consent (
+                    patient_id, accepted, decided_at, decided_by, consent_version
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (patient_id) DO UPDATE SET
+                    accepted = EXCLUDED.accepted,
+                    decided_at = EXCLUDED.decided_at,
+                    decided_by = EXCLUDED.decided_by,
+                    consent_version = EXCLUDED.consent_version
+            """, (patient_id, accepted, now, actor, "software-v1"))
+
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event, patient_id, reason, comment, actor, created_at
+                )
+                VALUES (
+                    'CONSENTIMIENTO_IA', %s, 'DECISION_CONSENTIMIENTO_IA',
+                    %s, %s, %s
+                )
+            """, (
+                patient_id,
+                "ACEPTADO" if accepted else "RECHAZADO",
+                actor,
+                now,
+            ))
+
+
+def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
+    _, treatment_rows = fetch_all(conn, """
+        SELECT patient_id, specialty, subspecialty
+        FROM rehab_active
+        WHERE id = %s AND status = 'ACTIVO'
+    """, (rehab_active_id,))
+
+    if not treatment_rows:
+        raise ValueError("No se encontró un tratamiento activo.")
+
+    patient_id, specialty, subspecialty = treatment_rows[0]
+
+    if get_patient_ai_consent(conn, patient_id) is not True:
+        raise PermissionError("No consta consentimiento aceptado para usar IA.")
+
+    _, rows = fetch_all(conn, """
+        SELECT session_date, clinical_note, pain_eva,
+               functional_status, goal_status, incidents
+        FROM treatment_sessions
+        WHERE rehab_active_id = %s
+          AND status IN ('REALIZADA', 'REVISION')
+          AND (
+              NULLIF(BTRIM(clinical_note), '') IS NOT NULL
+              OR pain_eva IS NOT NULL
+              OR NULLIF(BTRIM(functional_status), '') IS NOT NULL
+              OR NULLIF(BTRIM(goal_status), '') IS NOT NULL
+              OR NULLIF(BTRIM(incidents), '') IS NOT NULL
+          )
+        ORDER BY session_date ASC, id ASC
+    """, (rehab_active_id,))
+
+    if not rows:
+        raise ValueError("No hay informes clínicos para resumir.")
+
+    informes = [
+        {
+            "date": str(row[0]),
+            "clinical_note": row[1],
+            "pain_eva": row[2],
+            "functional_status": row[3],
+            "goal_status": row[4],
+            "incidents": row[5],
+        }
+        for row in rows
+    ]
+
+    indicadores = get_clinical_followup_summary(conn, rehab_active_id)
+
+    resumen, modelo = resumir_informes(
+        informes=informes,
+        indicadores=indicadores,
+    )
+
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO assignment_log (
+                    event, rehab_active_id, patient_id, specialty,
+                    subspecialty, reason, comment, actor, created_at
+                )
+                VALUES (
+                    'GENERACION_RESUMEN_IA', %s, %s, %s, %s,
+                    'RESUMEN_LOCAL_OLLAMA', %s, %s, %s
+                )
+            """, (
+                rehab_active_id,
+                patient_id,
+                specialty,
+                subspecialty,
+                f"Modelo {modelo}; informes procesados: {len(informes)}",
+                actor,
+                now_iso(),
+            ))
+
+    return resumen, modelo
 
 def get_session_summary(conn, rehab_active_id):
     _, rows = fetch_all(conn, """

@@ -57,6 +57,9 @@ from services import (
     get_dashboard_specialty_summary,
     get_dashboard_session_summary,
     get_dashboard_adherence_by_specialty,
+    get_patient_ai_consent,
+    set_patient_ai_consent,
+    generate_ai_clinical_summary,
 )
 from ui_helpers import (
     priority_badge,
@@ -77,6 +80,8 @@ from auth import (
     PROFESIONES_DISPONIBLES,
     PASSWORD_TEMPORAL_POR_DEFECTO,
 )
+
+from ai_clinical import OllamaError
 
 @st.cache_resource
 def inicializar_aplicacion():
@@ -530,10 +535,32 @@ elif page == "📝 Nueva solicitud":
     with c4:
         eligible = st.checkbox("Elegible", value=True, key="req_eligible")
 
+    ai_consent_accepted = None
+
+    if is_valid_nhc(patient_id):
+        consentimiento_actual = get_patient_ai_consent(conn, patient_id)
+        opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
+        indice = None if consentimiento_actual is None else int(consentimiento_actual)
+
+        decision = st.radio(
+            "¿El paciente acepta que sus informes se procesen con IA local?",
+            opciones,
+            index=indice,
+            key=f"req_ai_consent_{patient_id}",
+        )
+
+        if decision is not None:
+            ai_consent_accepted = decision == opciones[1]
+
+        st.caption(
+            "Si acepta, Ollama procesará los informes en este ordenador; "
+            "no se enviarán a un servicio de IA externo."
+        )
+
     selected_specialties = st.multiselect(
         "Especialidades",
         especialidades_activas,
-        key="req_specialties_multi"
+        key="req_specialties_multi",
     )
 
     st.markdown("### Configuración del tratamiento")
@@ -609,6 +636,8 @@ elif page == "📝 Nueva solicitud":
             st.error("Introduce el NHC del paciente.")
         elif not is_valid_nhc(patient_id):
             st.error("El NHC debe tener exactamente 6 números.")
+        elif ai_consent_accepted is None:
+            st.error("Selecciona si el paciente acepta o rechaza el uso de IA.")
         elif not selected_specialties:
             st.error("Selecciona al menos una especialidad.")
         else:
@@ -667,7 +696,8 @@ elif page == "📝 Nueva solicitud":
                 time_preference=time_preference,
                 transport_mode=transport_mode,
                 preferred_hour=preferred_hour,
-                coordination_rule=coordination_rule
+                coordination_rule=coordination_rule,
+                ai_consent_accepted=ai_consent_accepted,
             )
 
             st.success(f"Solicitud guardada para NHC {patient_id}. Se han creado {len(requests)} entradas.")
@@ -979,13 +1009,93 @@ elif page == "📈 Seguimiento clínico":
 
         st.markdown("### Informe automático")
 
-        report = generate_clinical_followup_report(conn, selected_patient["rehab_active_id"])
+        report = generate_clinical_followup_report(
+            conn,
+            selected_patient["rehab_active_id"],
+        )
+
         st.text_area(
             "Informe generado",
             value=report,
             height=320,
-            key="clinical_followup_report"
+            key="clinical_followup_report",
         )
+
+        patient_id = selected_patient["patient_id"]
+        rehab_id = selected_patient["rehab_active_id"]
+        consentimiento = get_patient_ai_consent(conn, patient_id)
+
+        st.markdown("#### Resumen con IA local")
+
+        opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
+        indice = None if consentimiento is None else int(consentimiento)
+
+        decision = st.radio(
+            "Decisión del paciente sobre el uso de IA",
+            opciones,
+            index=indice,
+            key=f"followup_ai_consent_{rehab_id}",
+        )
+
+        if st.button(
+                "Guardar decisión de IA",
+                key=f"save_ai_consent_{rehab_id}",
+        ):
+            if decision is None:
+                st.error("Selecciona aceptar o rechazar.")
+            else:
+                set_patient_ai_consent(
+                    conn,
+                    patient_id,
+                    accepted=(decision == opciones[1]),
+                    actor=actor_sidebar,
+                )
+                st.session_state.pop(f"ai_summary_{rehab_id}", None)
+                st.success("Decisión guardada.")
+                st.rerun()
+
+        if consentimiento is True:
+            st.info(
+                "El resultado es un borrador de apoyo basado en los datos registrados. "
+                "Debe revisarlo y validarlo un profesional; no modifica el tratamiento."
+            )
+
+            st.info(
+                "El resultado es un borrador de apoyo basado en los datos registrados. "
+                "Debe revisarlo y validarlo un profesional; no modifica el tratamiento."
+            )
+
+            if st.button(
+                    "Generar resumen con IA local",
+                    key=f"ai_summary_btn_{rehab_id}",
+            ):
+                try:
+                    with st.spinner("Generando resumen local..."):
+                        resumen, modelo = generate_ai_clinical_summary(
+                            conn,
+                            rehab_id,
+                            actor=actor_sidebar,
+                        )
+
+                    st.session_state[f"ai_summary_{rehab_id}"] = resumen
+                    st.session_state[f"ai_model_{rehab_id}"] = modelo
+
+                except (OllamaError, PermissionError, ValueError) as exc:
+                    st.error(str(exc))
+
+            if f"ai_summary_{rehab_id}" in st.session_state:
+                st.caption(
+                    f"Modelo: {st.session_state.get(f'ai_model_{rehab_id}', 'Ollama')}. "
+                    "Contrasta el resultado con los informes originales."
+                )
+                st.text_area(
+                    "Resumen, valoraciones y aspectos para revisar",
+                    value=st.session_state[f"ai_summary_{rehab_id}"],
+                    height=400,
+                    key=f"ai_summary_display_{rehab_id}",
+                )
+        else:
+            st.info("No consta aceptación; los informes no se procesarán con IA.")
 
         st.markdown("### Historial clínico de sesiones")
 

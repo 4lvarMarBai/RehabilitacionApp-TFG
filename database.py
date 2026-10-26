@@ -3,8 +3,6 @@ from datetime import datetime, UTC, date, time
 from psycopg_pool import ConnectionPool
 from pathlib import Path
 import tomllib
-
-import psycopg
 import streamlit as st
 
 
@@ -227,6 +225,16 @@ def init_db(conn):
             recorded_by TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL,
             FOREIGN KEY(rehab_active_id) REFERENCES rehab_active(id)
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS patient_ai_consent (
+            patient_id TEXT PRIMARY KEY,
+            accepted BOOLEAN NOT NULL,
+            decided_at TIMESTAMPTZ NOT NULL,
+            decided_by TEXT NOT NULL,
+            consent_version TEXT NOT NULL
         );
         """)
 
