@@ -221,3 +221,47 @@ __marimo__/
 
 # Base de datos local
 rehabilitacion.db
+
+# API: secretos y entornos privados del servidor
+.env.api
+.env.api.*
+!.env.api.example
+.venv-api/
+
+# Configuración privada, registros y datos locales
+configuracion/.env*
+logs/
+datos/
+
+# HTTPS local: ejecutable, certificados y claves generados
+herramientas/
+recursos/certificado_https_local.crt
+
+# Preferencias personales del editor
+.vscode/
+
+# Accesos generados para cada instalación
+*.lnk
+*.url
+
+# Bases de datos locales y copias de seguridad
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.dump
+*.backup
+
+# Claves y almacenes privados de certificados
+*.key
+*.p12
+*.pfx
+
+# Variables privadas por entorno
+.env.*
+!.env.example

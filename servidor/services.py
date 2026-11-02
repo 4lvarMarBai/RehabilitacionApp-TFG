@@ -1,28 +1,38 @@
+"""Operaciones de rehabilitación y registro de los cambios en la auditoría."""
 # services.py
 
-from database import fetch_all, now_iso
-from validators import validar_regla_coordinacion, validar_dias_asistencia
-from ai_clinical import resumir_informes
+from servidor.database import fetch_all, now_iso
+from comun.validators import validar_regla_coordinacion, validar_dias_asistencia
+from servidor.ai_clinical import resumir_informes
 
 
 # -------------------- STATS --------------------
 def get_stats(conn):
+    """Obtiene los contadores del panel en una sola consulta."""
     with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM waitlist WHERE status='EN_ESPERA' AND eligible=TRUE")
-        waiting = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM rehab_active WHERE status='ACTIVO'")
-        active = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM rehab_active WHERE status='ALTA'")
-        discharged = cur.fetchone()[0]
-
-    return waiting, active, discharged
+        cur.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM waitlist
+                 WHERE status = 'EN_ESPERA' AND eligible = TRUE),
+                COUNT(*) FILTER (WHERE status = 'ACTIVO'),
+                COUNT(*) FILTER (WHERE status = 'ALTA')
+            FROM rehab_active
+            WHERE status IN ('ACTIVO', 'ALTA')
+        """)
+        return tuple(cur.fetchone())
 
 
 # -------------------- PREVIEW --------------------
 
-def preview_next_patient(conn, specialty_filter, subspecialty_filter):
+
+def _waiting_filters(
+    specialty_filter,
+    subspecialty_filter,
+    slot_type_filter,
+    time_preference_filter,
+    transport_mode_filter,
+):
+    """Construye una sola regla de filtrado para previsualizar y asignar."""
     conditions = [
         "status = 'EN_ESPERA'",
         "eligible = TRUE",
@@ -36,6 +46,37 @@ def preview_next_patient(conn, specialty_filter, subspecialty_filter):
     if subspecialty_filter and subspecialty_filter != "Todas":
         conditions.append("subspecialty = %s")
         params.append(subspecialty_filter)
+
+    for column, value, allowed in (
+        ("slot_type", slot_type_filter, {"SIMPLE", "DOBLE"}),
+        ("time_preference", time_preference_filter, {"MAÑANA", "TARDE"}),
+        ("transport_mode", transport_mode_filter, {"NORMAL", "AMBULANCIA"}),
+    ):
+        if value and value != "Todas":
+            if value not in allowed:
+                raise ValueError("Filtro de asignación no válido.")
+            conditions.append(f"{column} = %s")
+            params.append(value)
+
+    return conditions, params
+
+
+def preview_next_patient(
+    conn,
+    specialty_filter,
+    subspecialty_filter,
+    slot_type_filter=None,
+    time_preference_filter=None,
+    transport_mode_filter=None,
+):
+    """Consulta el primer candidato con los mismos filtros y orden que la asignación."""
+    conditions, params = _waiting_filters(
+        specialty_filter,
+        subspecialty_filter,
+        slot_type_filter,
+        time_preference_filter,
+        transport_mode_filter,
+    )
 
     query = f"""
             SELECT
@@ -98,14 +139,18 @@ def add_waiting_patient_multiple(
     coordination_rule,
     ai_consent_accepted: bool | None = None,
 ):
+    """Guarda el consentimiento y una solicitud por tratamiento en una misma transacción."""
     if ai_consent_accepted is None:
-        raise ValueError("Debe registrarse la decisión del paciente sobre el uso de IA.")
+        raise ValueError(
+            "Debe registrarse la decisión del paciente sobre el uso de IA."
+        )
 
     now = now_iso()
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO patient_ai_consent (
                     patient_id, accepted, decided_at, decided_by, consent_version
                 )
@@ -115,15 +160,18 @@ def add_waiting_patient_multiple(
                     decided_at = EXCLUDED.decided_at,
                     decided_by = EXCLUDED.decided_by,
                     consent_version = EXCLUDED.consent_version
-            """, (
-                patient_id,
-                ai_consent_accepted,
-                now,
-                actor,
-                "software-v1",
-            ))
+            """,
+                (
+                    patient_id,
+                    ai_consent_accepted,
+                    now,
+                    actor,
+                    "software-v1",
+                ),
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event, patient_id, reason, comment, actor, created_at
                 )
@@ -135,15 +183,18 @@ def add_waiting_patient_multiple(
                     %s,
                     %s
                 )
-            """, (
-                patient_id,
-                "ACEPTADO" if ai_consent_accepted else "RECHAZADO",
-                actor,
-                now,
-            ))
+            """,
+                (
+                    patient_id,
+                    "ACEPTADO" if ai_consent_accepted else "RECHAZADO",
+                    actor,
+                    now,
+                ),
+            )
 
             for req in requests:
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO waitlist (
                         patient_id,
                         priority_level,
@@ -165,25 +216,28 @@ def add_waiting_patient_multiple(
                         %s, %s, %s, %s, %s, 'EN_ESPERA', %s
                     )
                     RETURNING id
-                """, (
-                    patient_id,
-                    priority_level,
-                    req["specialty"],
-                    req["subspecialty"],
-                    req["prescribed_sessions"],
-                    slot_type,
-                    time_preference,
-                    transport_mode,
-                    preferred_hour,
-                    coordination_rule,
-                    request_date_iso,
-                    now,
-                    eligible,
-                ))
+                """,
+                    (
+                        patient_id,
+                        priority_level,
+                        req["specialty"],
+                        req["subspecialty"],
+                        req["prescribed_sessions"],
+                        slot_type,
+                        time_preference,
+                        transport_mode,
+                        preferred_hour,
+                        coordination_rule,
+                        request_date_iso,
+                        now,
+                        eligible,
+                    ),
+                )
 
                 waitlist_id = cur.fetchone()[0]
 
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO assignment_log (
                         event,
                         waitlist_id,
@@ -204,15 +258,17 @@ def add_waiting_patient_multiple(
                         %s, NULL, %s, %s, %s, %s, NULL, NULL,
                         'SOLICITUD_CREADA', NULL, %s, %s
                     )
-                """, (
-                    waitlist_id,
-                    patient_id,
-                    req["specialty"],
-                    req["subspecialty"],
-                    priority_level,
-                    actor,
-                    now,
-                ))
+                """,
+                    (
+                        waitlist_id,
+                        patient_id,
+                        req["specialty"],
+                        req["subspecialty"],
+                        priority_level,
+                        actor,
+                        now,
+                    ),
+                )
 
 
 # -------------------- ASSIGN --------------------
@@ -224,25 +280,23 @@ def assign_next_patient(
     assigned_clinician_profession,
     specialty_filter,
     subspecialty_filter,
-    attendance_days
+    attendance_days,
+    slot_type_filter=None,
+    time_preference_filter=None,
+    transport_mode_filter=None,
 ):
+    """Bloquea y asigna el primer candidato compatible con los filtros, por prioridad y antigüedad."""
     error_dias = validar_dias_asistencia(attendance_days)
     if error_dias:
         raise ValueError(error_dias)
 
-    conditions = [
-        "status = 'EN_ESPERA'",
-        "eligible = TRUE",
-    ]
-    params = []
-
-    if specialty_filter and specialty_filter != "Todas":
-        conditions.append("specialty = %s")
-        params.append(specialty_filter)
-
-    if subspecialty_filter and subspecialty_filter != "Todas":
-        conditions.append("subspecialty = %s")
-        params.append(subspecialty_filter)
+    conditions, params = _waiting_filters(
+        specialty_filter,
+        subspecialty_filter,
+        slot_type_filter,
+        time_preference_filter,
+        transport_mode_filter,
+    )
 
     query = f"""
         SELECT
@@ -314,7 +368,8 @@ def assign_next_patient(
             raise ValueError(error)
 
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO rehab_active (
                     patient_id,
                     specialty,
@@ -340,37 +395,43 @@ def assign_next_patient(
                     %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVO'
                 )
                 RETURNING id
-            """, (
-                patient_id,
-                specialty,
-                subspecialty,
-                prescribed_sessions,
-                slot_type,
-                time_preference,
-                transport_mode,
-                preferred_hour,
-                coordination_rule,
-                ",".join(attendance_days),
-                now,
-                waitlist_id,
-                assigned_by,
-                now,
-                assigned_clinician_dni,
-                assigned_clinician_name,
-                assigned_clinician_profession,
-            ))
+            """,
+                (
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    prescribed_sessions,
+                    slot_type,
+                    time_preference,
+                    transport_mode,
+                    preferred_hour,
+                    coordination_rule,
+                    ",".join(attendance_days),
+                    now,
+                    waitlist_id,
+                    assigned_by,
+                    now,
+                    assigned_clinician_dni,
+                    assigned_clinician_name,
+                    assigned_clinician_profession,
+                ),
+            )
 
             rehab_id = cur.fetchone()[0]
 
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE waitlist
                 SET status = 'ASIGNADO'
                 WHERE id = %s
                   AND status = 'EN_ESPERA'
                   AND eligible = TRUE
-            """, (waitlist_id,))
+            """,
+                (waitlist_id,),
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event,
                     waitlist_id,
@@ -391,18 +452,20 @@ def assign_next_patient(
                     %s, %s, %s, %s, %s, %s, %s, %s,
                     'ASIGNACION', NULL, %s, %s
                 )
-            """, (
-                waitlist_id,
-                rehab_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                priority_level,
-                wait_days,
-                rule_applied,
-                assigned_by,
-                now,
-            ))
+            """,
+                (
+                    waitlist_id,
+                    rehab_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    priority_level,
+                    wait_days,
+                    rule_applied,
+                    assigned_by,
+                    now,
+                ),
+            )
 
     return {
         "rehab_id": rehab_id,
@@ -421,11 +484,13 @@ def assign_next_patient(
 
 # -------------------- DISCHARGE --------------------
 def discharge_patient(conn, rehab_active_id, reason, comment, actor):
+    """Da de alta el tratamiento activo y registra el motivo y el autor de la acción."""
     now = now_iso()
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     ra.patient_id,
                     ra.specialty,
@@ -438,7 +503,9 @@ def discharge_patient(conn, rehab_active_id, reason, comment, actor):
                 WHERE ra.id = %s
                   AND ra.status = 'ACTIVO'
                 FOR UPDATE OF ra
-            """, (rehab_active_id,))
+            """,
+                (rehab_active_id,),
+            )
 
             row = cur.fetchone()
 
@@ -447,16 +514,20 @@ def discharge_patient(conn, rehab_active_id, reason, comment, actor):
 
             patient_id, specialty, subspecialty, waitlist_id, priority_level = row
 
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE rehab_active
                 SET status = 'ALTA',
                     discharge_reason = %s,
                     discharge_comment = %s,
                     discharged_at = %s
                 WHERE id = %s
-            """, (reason, comment, now, rehab_active_id))
+            """,
+                (reason, comment, now, rehab_active_id),
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event,
                     waitlist_id,
@@ -477,18 +548,20 @@ def discharge_patient(conn, rehab_active_id, reason, comment, actor):
                     %s, %s, %s, %s, %s, %s,
                     NULL, NULL, %s, %s, %s, %s
                 )
-            """, (
-                waitlist_id,
-                rehab_active_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                priority_level,
-                reason,
-                comment,
-                actor,
-                now,
-            ))
+            """,
+                (
+                    waitlist_id,
+                    rehab_active_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    priority_level,
+                    reason,
+                    comment,
+                    actor,
+                    now,
+                ),
+            )
 
     return True
 
@@ -512,6 +585,7 @@ def add_treatment_session(
     goal_status: str = "",
     incidents: str = "",
 ):
+    """Guarda la sesión y los datos de evolución asociados al tratamiento."""
     created_at = now_iso()
 
     if status in ["REALIZADA", "REVISION"]:
@@ -535,7 +609,8 @@ def add_treatment_session(
         incidents = incidents.strip()
 
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO treatment_sessions
                 (
                     rehab_active_id,
@@ -557,28 +632,32 @@ def add_treatment_session(
                 )
             VALUES
                 (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            rehab_active_id,
-            patient_id,
-            specialty,
-            subspecialty,
-            session_date_value,
-            session_time_value,
-            status,
-            absence_reason,
-            out_of_schedule_reason,
-            recorded_by,
-            created_at,
-            clinical_note if clinical_note else None,
-            pain_eva,
-            functional_status if functional_status else None,
-            goal_status if goal_status else None,
-            incidents if incidents else None,
-        ))
+        """,
+            (
+                rehab_active_id,
+                patient_id,
+                specialty,
+                subspecialty,
+                session_date_value,
+                session_time_value,
+                status,
+                absence_reason,
+                out_of_schedule_reason,
+                recorded_by,
+                created_at,
+                clinical_note if clinical_note else None,
+                pain_eva,
+                functional_status if functional_status else None,
+                goal_status if goal_status else None,
+                incidents if incidents else None,
+            ),
+        )
 
 
 def get_treatment_sessions(conn, rehab_active_id: int):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT
             id,
             rehab_active_id,
@@ -600,11 +679,17 @@ def get_treatment_sessions(conn, rehab_active_id: int):
         FROM treatment_sessions
         WHERE rehab_active_id = %s
         ORDER BY session_date DESC, session_time DESC NULLS LAST, id DESC
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
     return cols, rows
 
+
 def get_clinical_followup_summary(conn, rehab_active_id: int):
-    _, rows = fetch_all(conn, """
+    """Calcula asistencia y evolución a partir de las sesiones registradas."""
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT
             session_date,
             status,
@@ -615,7 +700,9 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
         FROM treatment_sessions
         WHERE rehab_active_id = %s
         ORDER BY session_date ASC, id ASC
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
 
     total_sessions = 0
     realizadas = 0
@@ -649,10 +736,14 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
         if goal_status:
             last_goal_status = goal_status
 
-    adherence_denominator = realizadas + revisiones + faltas_justificadas + faltas_no_justificadas
+    adherence_denominator = (
+        realizadas + revisiones + faltas_justificadas + faltas_no_justificadas
+    )
     adherence_percent = 0
     if adherence_denominator > 0:
-        adherence_percent = round(((realizadas + revisiones) / adherence_denominator) * 100, 1)
+        adherence_percent = round(
+            ((realizadas + revisiones) / adherence_denominator) * 100, 1
+        )
 
     first_pain = pain_values[0] if pain_values else None
     last_pain = pain_values[-1] if pain_values else None
@@ -667,7 +758,9 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
             pain_trend = "Sin cambios"
 
     abandonment_risk = faltas_no_justificadas >= 2
-    stagnation_risk = last_goal_status in ["NO_INICIADO", "PARCIAL"] and pain_trend == "Sin cambios"
+    stagnation_risk = (
+        last_goal_status in ["NO_INICIADO", "PARCIAL"] and pain_trend == "Sin cambios"
+    )
 
     return {
         "total_sessions": total_sessions,
@@ -685,9 +778,16 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
         "stagnation_risk": stagnation_risk,
     }
 
-def generate_clinical_followup_report(conn, rehab_active_id: int):
-    summary = get_clinical_followup_summary(conn, rehab_active_id)
 
+def generate_clinical_followup_report(conn, rehab_active_id: int):
+    """Consulta el seguimiento y redacta el informe a partir de sus indicadores."""
+    return format_clinical_followup_report(
+        get_clinical_followup_summary(conn, rehab_active_id)
+    )
+
+
+def format_clinical_followup_report(summary):
+    """Redacta el informe sin volver a consultar sesiones ya calculadas."""
     texto = [
         "INFORME AUTOMÁTICO DE SEGUIMIENTO CLÍNICO",
         "",
@@ -709,7 +809,9 @@ def generate_clinical_followup_report(conn, rehab_active_id: int):
         texto.append("Evolución del dolor (EVA): sin datos suficientes.")
 
     if summary["last_functional_status"]:
-        texto.append(f"Última valoración funcional: {summary['last_functional_status']}.")
+        texto.append(
+            f"Última valoración funcional: {summary['last_functional_status']}."
+        )
     else:
         texto.append("Última valoración funcional: sin registro.")
 
@@ -721,32 +823,44 @@ def generate_clinical_followup_report(conn, rehab_active_id: int):
     texto.append("")
 
     if summary["abandonment_risk"]:
-        texto.append("Alerta: posible riesgo de abandono terapéutico por faltas no justificadas.")
+        texto.append(
+            "Alerta: posible riesgo de abandono terapéutico por faltas no justificadas."
+        )
     else:
         texto.append("No se detectan signos claros de abandono terapéutico.")
 
     if summary["stagnation_risk"]:
-        texto.append("Alerta: posible estancamiento funcional. Se recomienda revisar el plan terapéutico.")
+        texto.append(
+            "Alerta: posible estancamiento funcional. Se recomienda revisar el plan terapéutico."
+        )
     else:
         texto.append("No se detectan signos claros de estancamiento funcional.")
 
     return "\n".join(texto)
 
+
 def get_patient_ai_consent(conn, patient_id: str) -> bool | None:
-    _, rows = fetch_all(conn, """
+    """Consulta la decisión vigente del paciente; la ausencia no equivale a aceptación."""
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT accepted
         FROM patient_ai_consent
         WHERE patient_id = %s
-    """, (patient_id,))
+    """,
+        (patient_id,),
+    )
     return None if not rows else bool(rows[0][0])
 
 
 def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
+    """Guarda la decisión del paciente y deja constancia de quién la registró."""
     now = now_iso()
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO patient_ai_consent (
                     patient_id, accepted, decided_at, decided_by, consent_version
                 )
@@ -756,9 +870,12 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
                     decided_at = EXCLUDED.decided_at,
                     decided_by = EXCLUDED.decided_by,
                     consent_version = EXCLUDED.consent_version
-            """, (patient_id, accepted, now, actor, "software-v1"))
+            """,
+                (patient_id, accepted, now, actor, "software-v1"),
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event, patient_id, reason, comment, actor, created_at
                 )
@@ -766,20 +883,27 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
                     'CONSENTIMIENTO_IA', %s, 'DECISION_CONSENTIMIENTO_IA',
                     %s, %s, %s
                 )
-            """, (
-                patient_id,
-                "ACEPTADO" if accepted else "RECHAZADO",
-                actor,
-                now,
-            ))
+            """,
+                (
+                    patient_id,
+                    "ACEPTADO" if accepted else "RECHAZADO",
+                    actor,
+                    now,
+                ),
+            )
 
 
 def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
-    _, treatment_rows = fetch_all(conn, """
+    """Comprueba el consentimiento antes de enviar los informes al modelo local."""
+    _, treatment_rows = fetch_all(
+        conn,
+        """
         SELECT patient_id, specialty, subspecialty
         FROM rehab_active
         WHERE id = %s AND status = 'ACTIVO'
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
 
     if not treatment_rows:
         raise ValueError("No se encontró un tratamiento activo.")
@@ -789,7 +913,9 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
     if get_patient_ai_consent(conn, patient_id) is not True:
         raise PermissionError("No consta consentimiento aceptado para usar IA.")
 
-    _, rows = fetch_all(conn, """
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT session_date, clinical_note, pain_eva,
                functional_status, goal_status, incidents
         FROM treatment_sessions
@@ -803,7 +929,9 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
               OR NULLIF(BTRIM(incidents), '') IS NOT NULL
           )
         ORDER BY session_date ASC, id ASC
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
 
     if not rows:
         raise ValueError("No hay informes clínicos para resumir.")
@@ -829,7 +957,8 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event, rehab_active_id, patient_id, specialty,
                     subspecialty, reason, comment, actor, created_at
@@ -838,25 +967,32 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
                     'GENERACION_RESUMEN_IA', %s, %s, %s, %s,
                     'RESUMEN_LOCAL_OLLAMA', %s, %s, %s
                 )
-            """, (
-                rehab_active_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                f"Modelo {modelo}; informes procesados: {len(informes)}",
-                actor,
-                now_iso(),
-            ))
+            """,
+                (
+                    rehab_active_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    f"Modelo {modelo}; informes procesados: {len(informes)}",
+                    actor,
+                    now_iso(),
+                ),
+            )
 
     return resumen, modelo
 
+
 def get_session_summary(conn, rehab_active_id):
-    _, rows = fetch_all(conn, """
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT status, COUNT(*)
         FROM treatment_sessions
         WHERE rehab_active_id=%s
         GROUP BY status
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
 
     resumen = {
         "REALIZADA": 0,
@@ -870,6 +1006,7 @@ def get_session_summary(conn, rehab_active_id):
 
     return resumen
 
+
 def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
     """
     Elimina una solicitud de lista de espera y deja constancia en auditoría.
@@ -879,7 +1016,8 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     id,
                     patient_id,
@@ -890,7 +1028,9 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
                 FROM waitlist
                 WHERE id = %s
                 FOR UPDATE
-            """, (waitlist_id,))
+            """,
+                (waitlist_id,),
+            )
 
             row = cur.fetchone()
 
@@ -907,18 +1047,25 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
             ) = row
 
             if status != "EN_ESPERA":
-                return False, "No se puede eliminar una solicitud que ya ha sido asignada."
+                return (
+                    False,
+                    "No se puede eliminar una solicitud que ya ha sido asignada.",
+                )
 
-            cur.execute("""
+            cur.execute(
+                """
                 DELETE FROM waitlist
                 WHERE id = %s
                   AND status = 'EN_ESPERA'
-            """, (waitlist_id,))
+            """,
+                (waitlist_id,),
+            )
 
             if cur.rowcount != 1:
                 return False, "No se pudo eliminar la solicitud."
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log (
                     event,
                     waitlist_id,
@@ -941,17 +1088,20 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
                     'Registro eliminado por administrador',
                     %s, %s
                 )
-            """, (
-                waitlist_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                priority_level,
-                actor,
-                now,
-            ))
+            """,
+                (
+                    waitlist_id,
+                    patient_id,
+                    specialty,
+                    subspecialty,
+                    priority_level,
+                    actor,
+                    now,
+                ),
+            )
 
     return True, "Solicitud eliminada correctamente."
+
 
 def delete_active_treatment(conn, rehab_active_id: int, actor: str):
     """
@@ -962,11 +1112,14 @@ def delete_active_treatment(conn, rehab_active_id: int, actor: str):
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id, patient_id, specialty, subspecialty
                 FROM rehab_active
                 WHERE id = %s
-            """, (rehab_active_id,))
+            """,
+                (rehab_active_id,),
+            )
             row = cur.fetchone()
 
             if not row:
@@ -976,32 +1129,38 @@ def delete_active_treatment(conn, rehab_active_id: int, actor: str):
 
             # Registrar la eliminación del tratamiento.
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO assignment_log
                     (event, waitlist_id, rehab_active_id, patient_id, specialty, subspecialty,
                      chosen_priority_level, wait_days, rule_applied, reason, comment, actor, created_at)
                 VALUES
                     ('DESACTIVACION_ADMIN_TRATAMIENTO', NULL, %s, %s, %s, %s, NULL, NULL, NULL,
                      'ELIMINADO_POR_ADMIN', 'Tratamiento eliminado por administrador', %s, %s)
-            """, (
-                rehab_active_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                actor,
-                now
-            ))
+            """,
+                (rehab_active_id, patient_id, specialty, subspecialty, actor, now),
+            )
 
             # Obtener y registrar las sesiones que se eliminarán.
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id, patient_id, specialty, subspecialty, status
                 FROM treatment_sessions
                 WHERE rehab_active_id = %s
-            """, (rehab_active_id,))
+            """,
+                (rehab_active_id,),
+            )
             sesiones = cur.fetchall()
 
-            for session_id, session_patient_id, session_specialty, session_subspecialty, session_status in sesiones:
-                cur.execute("""
+            for (
+                session_id,
+                session_patient_id,
+                session_specialty,
+                session_subspecialty,
+                session_status,
+            ) in sesiones:
+                cur.execute(
+                    """
                     INSERT INTO assignment_log (
                         event,
                         waitlist_id,
@@ -1020,52 +1179,68 @@ def delete_active_treatment(conn, rehab_active_id: int, actor: str):
                         NULL, %s, %s, %s, %s, %s,
                         %s, 'Sesión eliminada al eliminar el tratamiento', %s, %s
                     )
-                """, (
-                    rehab_active_id,
-                    session_id,
-                    session_patient_id,
-                    session_specialty,
-                    session_subspecialty,
-                    session_status,
-                    actor,
-                    now,
-                ))
+                """,
+                    (
+                        rehab_active_id,
+                        session_id,
+                        session_patient_id,
+                        session_specialty,
+                        session_subspecialty,
+                        session_status,
+                        actor,
+                        now,
+                    ),
+                )
 
             # Eliminar las sesiones y después el tratamiento.
 
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE rehab_active
                 SET status = 'ELIMINADO_ADMIN'
                 WHERE id = %s
-            """, (rehab_active_id,))
+            """,
+                (rehab_active_id,),
+            )
 
     return True, "Tratamiento eliminado correctamente."
 
+
 def get_patient_pain_series(conn, rehab_active_id: int):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT session_date, pain_eva
         FROM treatment_sessions
         WHERE rehab_active_id = %s
           AND pain_eva IS NOT NULL
           AND status IN ('REALIZADA', 'REVISION')
         ORDER BY session_date ASC, id ASC
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
     return cols, rows
 
 
 def get_patient_status_distribution(conn, rehab_active_id: int):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT status, COUNT(*) AS total
         FROM treatment_sessions
         WHERE rehab_active_id = %s
         GROUP BY status
         ORDER BY status ASC
-    """, (rehab_active_id,))
+    """,
+        (rehab_active_id,),
+    )
     return cols, rows
 
 
 def get_dashboard_specialty_summary(conn):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT
             specialty,
             COUNT(*) FILTER (WHERE status = 'ACTIVO') AS activos,
@@ -1073,24 +1248,30 @@ def get_dashboard_specialty_summary(conn):
         FROM rehab_active
         GROUP BY specialty
         ORDER BY specialty ASC
-    """)
+    """,
+    )
     return cols, rows
 
 
 def get_dashboard_session_summary(conn):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT
             status,
             COUNT(*) AS total
         FROM treatment_sessions
         GROUP BY status
         ORDER BY status ASC
-    """)
+    """,
+    )
     return cols, rows
 
 
 def get_dashboard_adherence_by_specialty(conn):
-    cols, rows = fetch_all(conn, """
+    cols, rows = fetch_all(
+        conn,
+        """
         SELECT
             specialty,
             COUNT(*) FILTER (WHERE status IN ('REALIZADA', 'REVISION')) AS asistidas,
@@ -1099,5 +1280,6 @@ def get_dashboard_adherence_by_specialty(conn):
         FROM treatment_sessions
         GROUP BY specialty
         ORDER BY specialty ASC
-    """)
+    """,
+    )
     return cols, rows

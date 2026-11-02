@@ -1,8 +1,11 @@
+"""Usuarios, comprobación de contraseñas y preparación de los catálogos de acceso."""
+
 import hashlib
 import hmac
 import os
+import re
 import secrets
-from database import fetch_all, execute_sql
+from servidor.database import fetch_all, execute_sql
 
 
 PROFESIONES_DISPONIBLES = [
@@ -28,10 +31,7 @@ def hash_password(password: str) -> str:
         PBKDF2_ITERATIONS,
     ).hex()
 
-    return (
-        f"{PASSWORD_HASH_PREFIX}"
-        f"{PBKDF2_ITERATIONS}${salt.hex()}${password_hash}"
-    )
+    return f"{PASSWORD_HASH_PREFIX}{PBKDF2_ITERATIONS}${salt.hex()}${password_hash}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
@@ -55,7 +55,9 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def init_auth_db(conn):
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         CREATE TABLE IF NOT EXISTS users (
             id BIGSERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -68,24 +70,55 @@ def init_auth_db(conn):
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
-    """)
+    """,
+    )
 
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         ALTER TABLE users
         ADD COLUMN IF NOT EXISTS profession TEXT;
-    """)
+    """,
+    )
 
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         ALTER TABLE users
         ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
-    """)
+    """,
+    )
+
+    init_professions_db(conn)
+    init_visit_log_db(conn)
 
 
-def create_user(conn, username: str, full_name: str, dni: str, profession: str, role: str):
+def init_professions_db(conn):
+    execute_sql(
+        conn,
+        "CREATE TABLE IF NOT EXISTS professions_config (name TEXT PRIMARY KEY, active BOOLEAN NOT NULL DEFAULT TRUE)",
+    )
+    for profession in PROFESIONES_DISPONIBLES:
+        execute_sql(
+            conn,
+            "INSERT INTO professions_config (name) VALUES (%s) ON CONFLICT DO NOTHING",
+            (profession,),
+        )
+    execute_sql(
+        conn,
+        "INSERT INTO professions_config (name) SELECT DISTINCT BTRIM(profession) FROM users WHERE profession IS NOT NULL AND BTRIM(profession) <> '' ON CONFLICT DO NOTHING",
+    )
+
+
+def create_user(
+    conn, username: str, full_name: str, dni: str, profession: str, role: str
+):
+    """Registra una cuenta y devuelve si se ha creado sin duplicar usuario ni DNI."""
     password_hash = hash_password(PASSWORD_TEMPORAL_POR_DEFECTO)
 
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO users (
                 username,
                 full_name,
@@ -99,19 +132,22 @@ def create_user(conn, username: str, full_name: str, dni: str, profession: str, 
             VALUES (%s, %s, %s, %s, %s, %s, TRUE, TRUE)
             ON CONFLICT DO NOTHING
             RETURNING id
-        """, (
-            username,
-            full_name,
-            dni,
-            profession,
-            password_hash,
-            role,
-        ))
+        """,
+            (
+                username,
+                full_name,
+                dni,
+                profession,
+                password_hash,
+                role,
+            ),
+        )
 
         return cur.fetchone() is not None
 
 
 def ensure_admin_user(conn):
+    """Crea el administrador inicial si no existe; nunca cambia una cuenta existente."""
     _, rows = fetch_all(
         conn,
         "SELECT id FROM users WHERE username = %s",
@@ -129,7 +165,9 @@ def ensure_admin_user(conn):
             "12 caracteres antes de crear el administrador inicial."
         )
 
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         INSERT INTO users (
             username,
             full_name,
@@ -141,28 +179,49 @@ def ensure_admin_user(conn):
             active
         )
         VALUES (%s, %s, %s, %s, %s, %s, TRUE, TRUE)
-    """, (
-        "admin",
-        "Administrador del sistema",
-        "00000000T",
-        "Administrador",
-        hash_password(initial_password),
-        "ADMIN",
-    ))
+    """,
+        (
+            "admin",
+            "Administrador del sistema",
+            "00000000T",
+            "Administrador",
+            hash_password(initial_password),
+            "ADMIN",
+        ),
+    )
 
 
 def authenticate_user(conn, username: str, password: str):
-    _, rows = fetch_all(conn, """
+    """Comprueba la contraseña y actualiza el hash antiguo solo tras un acceso válido."""
+    username = username.strip()
+    if re.fullmatch(r"[0-9]{8}[A-Za-z]", username):
+        username = username.upper()
+
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT id, username, full_name, dni, profession, password_hash, role, must_change_password, active
         FROM users
         WHERE username = %s
         LIMIT 1
-    """, (username,))
+    """,
+        (username,),
+    )
 
     if not rows:
         return None
 
-    user_id, db_username, full_name, dni, profession, password_hash, role, must_change_password, active = rows[0]
+    (
+        user_id,
+        db_username,
+        full_name,
+        dni,
+        profession,
+        password_hash,
+        role,
+        must_change_password,
+        active,
+    ) = rows[0]
 
     if not active:
         return None
@@ -191,29 +250,58 @@ def authenticate_user(conn, username: str, password: str):
 def change_user_password(conn, user_id: int, new_password: str):
     new_hash = hash_password(new_password)
 
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         UPDATE users
         SET password_hash = %s,
             must_change_password = FALSE
         WHERE id = %s
-    """, (new_hash, user_id))
+    """,
+        (new_hash, user_id),
+    )
 
 
 def reset_user_password_to_default(conn, user_id: int):
     default_hash = hash_password(PASSWORD_TEMPORAL_POR_DEFECTO)
 
-    execute_sql(conn, """
+    execute_sql(
+        conn,
+        """
         UPDATE users
         SET password_hash = %s,
             must_change_password = TRUE
         WHERE id = %s
-    """, (default_hash, user_id))
+    """,
+        (default_hash, user_id),
+    )
 
 
 def get_all_users(conn):
-    _, rows = fetch_all(conn, """
+    _, rows = fetch_all(
+        conn,
+        """
         SELECT id, username, full_name, dni, profession, role, must_change_password, active, created_at
         FROM users
         ORDER BY username ASC
-    """)
+    """,
+    )
     return rows
+
+
+def init_visit_log_db(conn):
+    execute_sql(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS clinical_visit_log (
+            clinician_dni TEXT NOT NULL,
+            patient_id TEXT NOT NULL,
+            visit_date DATE NOT NULL,
+            PRIMARY KEY (clinician_dni, patient_id, visit_date)
+        )
+    """,
+    )
+    execute_sql(
+        conn,
+        "CREATE INDEX IF NOT EXISTS idx_clinical_visits_date ON clinical_visit_log (visit_date DESC)",
+    )

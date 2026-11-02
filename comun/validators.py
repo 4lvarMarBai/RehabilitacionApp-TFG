@@ -1,10 +1,12 @@
+"""Reglas de identificación, horarios y coordinación entre tratamientos."""
+
 import re
-from config import FISIO_ESPECIALIDADES
+from comun.config import FISIO_ESPECIALIDADES
 
 # -------------------- Validaciones básicas --------------------
 
-def is_valid_dni(dni: str) -> bool:
 
+def is_valid_dni(dni: str) -> bool:
 
     if not dni or len(dni) != 9:
         return False
@@ -14,7 +16,7 @@ def is_valid_dni(dni: str) -> bool:
     numero = dni[:8]
     letra = dni[8]
 
-    if not numero.isdigit() or not letra.isalpha():
+    if not re.fullmatch(r"[0-9]{8}[A-Z]", dni):
         return False
 
     letras = "TRWAGMYFPDXBNJZSQVHLCKE"
@@ -23,12 +25,14 @@ def is_valid_dni(dni: str) -> bool:
 
     return letra == letra_correcta
 
+
 def is_valid_nhc(nhc: str) -> bool:
     nhc = nhc.strip()
     return bool(re.fullmatch(r"\d{6}", nhc))
 
 
 # -------------------- Lógica clínica --------------------
+
 
 def es_fisio(specialty: str) -> bool:
     return specialty in FISIO_ESPECIALIDADES
@@ -48,11 +52,12 @@ def parse_attendance_days(attendance_days_text: str) -> list[str]:
 
 # -------------------- Reglas de tratamiento --------------------
 
+
 def validar_preferencias_tratamiento(
     slot_type: str,
     time_preference: str,
     transport_mode: str,
-    preferred_hour: str | None
+    preferred_hour: str | None,
 ):
     if slot_type not in ["SIMPLE", "DOBLE"]:
         return "Debes seleccionar si el hueco es simple o doble."
@@ -78,25 +83,27 @@ def validar_regla_coordinacion(
     patient_id: str,
     specialty: str,
     attendance_days: list[str],
-    coordination_rule: str
+    coordination_rule: str,
 ):
     if coordination_rule not in ["MISMO_DIA", "DIAS_ALTERNOS"]:
         return None
 
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT specialty, attendance_days
             FROM rehab_active
             WHERE patient_id = %s AND status = 'ACTIVO'
-        """, (patient_id,))
+        """,
+            (patient_id,),
+        )
         tratamientos = cur.fetchall()
 
     for sp, attendance_days_text in tratamientos:
         dias_existentes = parse_attendance_days(attendance_days_text)
 
-        if (
-            (specialty == "Terapia ocupacional" and es_fisio(sp))
-            or (es_fisio(specialty) and sp == "Terapia ocupacional")
+        if (specialty == "Terapia ocupacional" and es_fisio(sp)) or (
+            es_fisio(specialty) and sp == "Terapia ocupacional"
         ):
             if coordination_rule == "MISMO_DIA":
                 if set(attendance_days) != set(dias_existentes):
@@ -110,6 +117,7 @@ def validar_regla_coordinacion(
 
 
 # -------------------- Validación de sesiones --------------------
+
 
 def hora_es_manana(hora_valor):
     if hora_valor is None:
@@ -154,6 +162,7 @@ def validar_hora_sesion(selected_patient: dict, session_time_value):
             return f"Este paciente en ambulancia tiene como hora asignada {preferred_hour}."
 
     return None
+
 
 def validar_dias_asistencia(attendance_days: list[str]):
     opciones_validas = [

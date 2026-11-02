@@ -1,3 +1,5 @@
+"""Resumen de informes con Ollama, sujeto al consentimiento y a revisión profesional."""
+
 import json
 import os
 from urllib.error import HTTPError, URLError

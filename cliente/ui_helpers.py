@@ -1,12 +1,14 @@
+"""Presentación de estados, fechas y calendarios de las sesiones."""
+
 import calendar
 from collections import defaultdict
 import streamlit as st
-from database import fetch_all
+from cliente.api_client import get_table
 
 
 def priority_badge(p: str) -> str:
-    if p == "Personal SACYL":
-        return "🟣 Personal SACYL"
+    if p == "personal SACYL":
+        return "🟣 personal SACYL"
     if p == "urgente":
         return "🔴 urgente"
     if p == "preferente":
@@ -52,14 +54,9 @@ def parse_attendance_days(attendance_days_text: str) -> list[str]:
 
 
 def render_mini_calendar(conn, rehab_active_id: int, year: int, month: int):
-    _, rows = fetch_all(conn, """
-        SELECT session_date, status
-        FROM treatment_sessions
-        WHERE rehab_active_id = %s
-          AND EXTRACT(YEAR FROM session_date) = %s
-          AND EXTRACT(MONTH FROM session_date) = %s
-        ORDER BY session_date ASC
-    """, (rehab_active_id, year, month))
+    _, rows = get_table(
+        conn, "calendar", rehab_active_id=rehab_active_id, year=year, month=month
+    )
 
     sesiones_por_dia = defaultdict(list)
     for session_date, status in rows:
@@ -127,7 +124,7 @@ def render_mini_calendar(conn, rehab_active_id: int, year: int, month: int):
     html += f'<div class="leyenda-item"><span class="mini-cal-dot" style="background:{colores["REVISION"]};"></span>Revisión</div>'
     html += f'<div class="leyenda-item"><span class="mini-cal-dot" style="background:{colores["FALTA_JUSTIFICADA"]};"></span>Falta justificada</div>'
     html += f'<div class="leyenda-item"><span class="mini-cal-dot" style="background:{colores["FALTA_NO_JUSTIFICADA"]};"></span>Falta no justificada</div>'
-    html += '</div>'
+    html += "</div>"
 
     html += '<table class="mini-calendario">'
     html += "<tr>" + "".join(f"<th>{d}</th>" for d in nombres_dias) + "</tr>"
@@ -148,3 +145,18 @@ def render_mini_calendar(conn, rehab_active_id: int, year: int, month: int):
 
     html += "</table>"
     st.markdown(html, unsafe_allow_html=True)
+
+
+def audit_event_label(event):
+    return {
+        "CREACION_SOLICITUD": "Solicita tratamiento",
+        "ASIGNACION_AUTOMATICA": "Comienza el tratamiento",
+        "ALTA_TRATAMIENTO": "Alta del tratamiento",
+        "REGISTRO_SESION": "Registro de sesión",
+        "MODIFICACION_SESION": "Modificación de sesión",
+        "ELIMINACION_SESION": "Eliminación de sesión",
+        "ELIMINACION_ADMIN_LISTA_ESPERA": "Eliminación administrativa de solicitud",
+        "ELIMINACION_ADMIN_TRATAMIENTO": "Eliminación administrativa de tratamiento",
+        "CONSENTIMIENTO_IA": "Decisión sobre el uso de IA",
+        "GENERACION_RESUMEN_IA": "Generación de resumen con IA",
+    }.get(event, (event or "Evento sin identificar").replace("_", " ").capitalize())

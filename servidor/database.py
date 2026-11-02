@@ -1,57 +1,17 @@
+"""Conexión a PostgreSQL y creación de tablas e índices de la aplicación."""
+
 import os
 from datetime import datetime, UTC, date, time
-from psycopg_pool import ConnectionPool
-from pathlib import Path
-import tomllib
-import streamlit as st
 
 
 def get_database_url() -> str:
-    secrets_path = (
-        Path(__file__).resolve().parent
-        / ".streamlit"
-        / "secrets.toml"
-    )
-
-    db_url = None
-
-    if secrets_path.is_file():
-        with secrets_path.open("rb") as archivo:
-            db_url = tomllib.load(archivo).get("DATABASE_URL")
-
-    if not db_url:
-        db_url = os.getenv("DATABASE_URL")
-
-    if not db_url:
+    """Solo el servidor tiene DATABASE_URL; la API no lee secretos de Streamlit."""
+    value = os.getenv("DATABASE_URL", "").strip()
+    if not value:
         raise RuntimeError(
-            f"No se ha encontrado DATABASE_URL. "
-            f"Comprueba este archivo: {secrets_path}"
+            "Configura DATABASE_URL en el entorno del servidor o en .env.api."
         )
-
-    return db_url
-
-
-def _devolver_conexion(conn):
-    get_pool().putconn(conn)
-
-
-@st.cache_resource
-def get_pool():
-    pool = ConnectionPool(
-        conninfo=get_database_url(),
-        min_size=1,
-        max_size=10,
-        timeout=30,
-        kwargs={"autocommit": True},
-        open=True,
-    )
-    pool.wait(timeout=30)
-    return pool
-
-
-@st.cache_resource(scope="session", on_release=_devolver_conexion)
-def get_conn():
-    return get_pool().getconn(timeout=30)
+    return value
 
 
 def fetch_all(conn, query, params=()):
@@ -118,11 +78,14 @@ def init_db(conn):
             "Columna/raquis",
             "General",
         ]:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO subspecialties_config (specialty_name, name, active)
                 VALUES (%s, %s, TRUE)
                 ON CONFLICT (specialty_name, name) DO NOTHING;
-            """, ("Cinesiterapia", area))
+            """,
+                ("Cinesiterapia", area),
+            )
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS waitlist (
@@ -238,31 +201,93 @@ def init_db(conn):
         );
         """)
 
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS discharge_comment TEXT;")
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS discharge_comment TEXT;"
+        )
         cur.execute("ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS comment TEXT;")
-        cur.execute("ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS session_id BIGINT;")
-        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS attendance_days TEXT;")
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS out_of_schedule_reason TEXT;")
+        cur.execute(
+            "ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS session_id BIGINT;"
+        )
+        cur.execute(
+            "ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS prescribed_sessions INTEGER;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS attendance_days TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS out_of_schedule_reason TEXT;"
+        )
 
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS clinical_note TEXT;")
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS pain_eva INTEGER;")
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS functional_status TEXT;")
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS goal_status TEXT;")
-        cur.execute("ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS incidents TEXT;")
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS clinical_note TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS pain_eva INTEGER;"
+        )
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS functional_status TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS goal_status TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS incidents TEXT;"
+        )
 
         cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS slot_type TEXT;")
-        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS time_preference TEXT;")
-        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS transport_mode TEXT;")
-        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS preferred_hour TEXT;")
-        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS coordination_rule TEXT;")
+        cur.execute(
+            "ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS time_preference TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS transport_mode TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS preferred_hour TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS coordination_rule TEXT;"
+        )
 
         cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS slot_type TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS time_preference TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS transport_mode TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS preferred_hour TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS coordination_rule TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_dni TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_name TEXT;")
-        cur.execute("ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_profession TEXT;")
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS time_preference TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS transport_mode TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS preferred_hour TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS coordination_rule TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_dni TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_name TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE rehab_active ADD COLUMN IF NOT EXISTS assigned_clinician_profession TEXT;"
+        )
+
+        # Índices para filtrar listados y localizar sesiones y referencias.
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_waitlist_pending_filters ON waitlist (specialty, subspecialty, request_date, id) WHERE status = 'EN_ESPERA' AND eligible = TRUE"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rehab_status_id ON rehab_active (status, id DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rehab_source_waitlist ON rehab_active (source_waitlist_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_treatment_date ON treatment_sessions (rehab_active_id, session_date, id)"
+        )
+
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rehab_patient_active ON rehab_active (patient_id, id DESC) WHERE status = 'ACTIVO'"
+        )

@@ -1,3 +1,5 @@
+"""Valores compartidos por formularios y validaciones."""
+
 PRIORIDADES = ["urgente", "preferente", "ordinario", "personal SACYL"]
 
 OPCIONES_ASISTENCIA = {
@@ -13,3 +15,18 @@ HORAS_AMBULANCIA = ["09:00", "12:00"]
 REGLAS_COORDINACION = ["NINGUNA", "MISMO_DIA", "DIAS_ALTERNOS"]
 
 FISIO_ESPECIALIDADES = ["Electroterapia", "Cinesiterapia"]
+MESES_ES = (
+    "",
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+)
