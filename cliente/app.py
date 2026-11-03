@@ -5,6 +5,7 @@ from datetime import date, time
 
 
 import streamlit as st
+import json
 
 from comun.config import (
     PRIORIDADES,
@@ -1159,8 +1160,24 @@ elif page == "📈 Seguimiento clínico":
         patient_id = selected_patient["patient_id"]
         rehab_id = selected_patient["rehab_active_id"]
         consentimiento = get_patient_ai_consent(conn, patient_id)
+        # No reutilizar borradores antiguos que carezcan del marcado de demostración.
+        metadata_ia = st.session_state.get(f"ai_metadata_{rehab_id}", {})
+        if (
+            metadata_ia.get("use_mode") != "demo"
+            or metadata_ia.get("ai_generated") is not True
+        ):
+            for campo_ia in (
+                "ai_summary",
+                "ai_model",
+                "ai_metadata",
+                "ai_summary_display",
+            ):
+                st.session_state.pop(f"{campo_ia}_{rehab_id}", None)
 
-        st.markdown("#### Resumen con IA local")
+        st.markdown("#### Resumen con IA local — demostración del TFG")
+        st.caption(
+            "La decisión de aceptación se simula con casos ficticios. No se recoge aquí un consentimiento jurídico para tratar datos reales."
+        )
 
         opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
         indice = None if consentimiento is None else int(consentimiento)
@@ -1186,23 +1203,28 @@ elif page == "📈 Seguimiento clínico":
                     actor=actor_sidebar,
                 )
                 st.session_state.pop(f"ai_summary_{rehab_id}", None)
+                st.session_state.pop(f"ai_metadata_{rehab_id}", None)
+                st.session_state.pop(f"ai_summary_display_{rehab_id}", None)
                 st.success("Decisión guardada.")
                 st.rerun()
 
         if consentimiento is True:
-            st.info(
-                "El resultado es un borrador de apoyo basado en los datos registrados. "
-                "Debe revisarlo y validarlo un profesional; no modifica el tratamiento."
+            st.warning(
+                "IA experimental para el TFG: utiliza solo informes ficticios. El resultado puede contener errores, omisiones o sesgos y no está autorizado para atender pacientes reales."
             )
-
-            st.info(
-                "El resultado es un borrador de apoyo basado en los datos registrados. "
-                "Debe revisarlo y validarlo un profesional; no modifica el tratamiento."
+            with st.expander("Antes de utilizar el resumen"):
+                st.write(
+                    "Comprueba las fuentes, fechas y datos ausentes. El modelo no decide prioridades, altas ni cambios de tratamiento. La aceptación simulada no sustituye una base jurídica ni una autorización del hospital. La ocultación de algunos identificadores no garantiza anonimización."
+                )
+            synthetic_confirmed = st.checkbox(
+                "Confirmo que este caso y sus informes son ficticios y que no usaré el resultado para atender pacientes reales",
+                key=f"ai_demo_confirm_{rehab_id}",
             )
 
             if st.button(
                 "Generar resumen con IA local",
                 key=f"ai_summary_btn_{rehab_id}",
+                disabled=not synthetic_confirmed,
             ):
                 try:
                     with st.spinner("Generando resumen local..."):
@@ -1210,6 +1232,7 @@ elif page == "📈 Seguimiento clínico":
                             conn,
                             rehab_id,
                             actor=actor_sidebar,
+                            synthetic_data_confirmed=synthetic_confirmed,
                         )
 
                     st.session_state[f"ai_summary_{rehab_id}"] = resumen
@@ -1228,6 +1251,22 @@ elif page == "📈 Seguimiento clínico":
                     value=st.session_state[f"ai_summary_{rehab_id}"],
                     height=400,
                     key=f"ai_summary_display_{rehab_id}",
+                )
+                st.download_button(
+                    "Descargar borrador identificado como IA (JSON)",
+                    data=json.dumps(
+                        {
+                            "summary": st.session_state[f"ai_summary_{rehab_id}"],
+                            "metadata": st.session_state.get(
+                                f"ai_metadata_{rehab_id}", {}
+                            ),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    file_name="borrador_ia_demostracion.json",
+                    mime="application/json",
+                    key=f"ai_download_{rehab_id}",
                 )
         else:
             st.info("No consta aceptación; los informes no se procesarán con IA.")

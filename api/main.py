@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+from datetime import datetime, UTC
 from threading import BoundedSemaphore
 
 import psycopg
@@ -32,6 +33,8 @@ from api.schemas import (
     ProfessionCreate,
     ProfessionState,
 )
+from api.schemas import AISummaryRequest
+from servidor.ai_policy import require_demo, PROMPT_VERSION, digest
 from api.security import (
     admin_user,
     bearer,
@@ -525,7 +528,13 @@ def save_consent(
 
 
 @app.post("/treatments/{rehab_id}/ai-summary")
-def ai_summary(rehab_id: int, user=Depends(ready_user), conn=Depends(get_conn)):
+def ai_summary(
+    rehab_id: int,
+    body: AISummaryRequest,
+    user=Depends(ready_user),
+    conn=Depends(get_conn),
+):
+    require_demo(body.synthetic_data_confirmed)
     if not ai_slot.acquire(blocking=False):
         raise HTTPException(
             429, "Ya hay un informe de IA en proceso. Inténtalo después."
@@ -533,9 +542,25 @@ def ai_summary(rehab_id: int, user=Depends(ready_user), conn=Depends(get_conn)):
     try:
         # Esta función vuelve a comprobar el consentimiento en el servidor.
         summary, model = svc.generate_ai_clinical_summary(
-            conn, rehab_id, actor=user["dni"]
+            conn,
+            rehab_id,
+            actor=user["dni"],
+            synthetic_data_confirmed=body.synthetic_data_confirmed,
         )
-        return {"summary": summary, "model": model}
+        return {
+            "summary": summary,
+            "model": model,
+            "metadata": {
+                "ai_generated": True,
+                "use_mode": "demo",
+                "synthetic_data_confirmed": True,
+                "prompt_version": PROMPT_VERSION,
+                "human_review_required": True,
+                "clinical_use_authorized": False,
+                "summary_sha256": digest(summary),
+                "generated_at": datetime.now(UTC).isoformat(),
+            },
+        }
     finally:
         ai_slot.release()
 

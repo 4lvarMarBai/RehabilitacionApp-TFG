@@ -4,6 +4,13 @@
 from servidor.database import fetch_all, now_iso
 from comun.validators import validar_regla_coordinacion, validar_dias_asistencia
 from servidor.ai_clinical import resumir_informes
+from servidor.ai_policy import (
+    require_demo,
+    redact_text,
+    minimize_payload,
+    digest,
+    PROMPT_VERSION,
+)
 
 
 # -------------------- STATS --------------------
@@ -893,8 +900,11 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
             )
 
 
-def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
+def generate_ai_clinical_summary(
+    conn, rehab_active_id: int, actor: str, *, synthetic_data_confirmed=False
+):
     """Comprueba el consentimiento antes de enviar los informes al modelo local."""
+    require_demo(synthetic_data_confirmed)
     _, treatment_rows = fetch_all(
         conn,
         """
@@ -938,22 +948,30 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
 
     informes = [
         {
+            "source_id": f"F{index + 1}",
             "date": str(row[0]),
-            "clinical_note": row[1],
+            "clinical_note": redact_text(row[1], patient_id),
             "pain_eva": row[2],
-            "functional_status": row[3],
-            "goal_status": row[4],
-            "incidents": row[5],
+            "functional_status": redact_text(row[3], patient_id),
+            "goal_status": redact_text(row[4], patient_id),
+            "incidents": redact_text(row[5], patient_id),
         }
-        for row in rows
+        for index, row in enumerate(rows)
     ]
 
-    indicadores = get_clinical_followup_summary(conn, rehab_active_id)
+    indicadores = minimize_payload(
+        get_clinical_followup_summary(conn, rehab_active_id), patient_id
+    )
 
     resumen, modelo = resumir_informes(
         informes=informes,
         indicadores=indicadores,
     )
+
+    if get_patient_ai_consent(conn, patient_id) is not True:
+        raise PermissionError(
+            "La aceptación se ha retirado durante la generación. No se mostrará el resultado."
+        )
 
     with conn.transaction():
         with conn.cursor() as cur:
@@ -973,7 +991,7 @@ def generate_ai_clinical_summary(conn, rehab_active_id: int, actor: str):
                     patient_id,
                     specialty,
                     subspecialty,
-                    f"Modelo {modelo}; informes procesados: {len(informes)}",
+                    f"Modelo {modelo}; prompt={PROMPT_VERSION}; modo=demo; fuentes={len(informes)}; entrada_sha256={digest({'informes': informes, 'indicadores': indicadores})}; salida_sha256={digest(resumen)}",
                     actor,
                     now_iso(),
                 ),

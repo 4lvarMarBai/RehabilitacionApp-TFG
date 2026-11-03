@@ -19,6 +19,7 @@ FILES = (
     "recursos/Rehabilitacion - Usuario.url",
     "recursos/RehabilitacionIcon.ico",
     "README.md",
+    "licencia",
 )
 
 

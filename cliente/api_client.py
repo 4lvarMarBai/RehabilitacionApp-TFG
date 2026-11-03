@@ -440,9 +440,17 @@ def set_patient_ai_consent(conn, patient_id, accepted, actor):
     )
 
 
-def generate_ai_clinical_summary(conn, rehab_active_id, actor):
+def generate_ai_clinical_summary(
+    conn, rehab_active_id, actor, *, synthetic_data_confirmed=False
+):
     """Comprueba el consentimiento antes de enviar los informes al modelo local."""
-    result = _request("POST", f"/treatments/{rehab_active_id}/ai-summary", timeout=240)
+    result = _request(
+        "POST",
+        f"/treatments/{rehab_active_id}/ai-summary",
+        data={"synthetic_data_confirmed": synthetic_data_confirmed},
+        timeout=240,
+    )
+    st.session_state[f"ai_metadata_{rehab_active_id}"] = result.get("metadata", {})
     return result["summary"], result["model"]
 
 

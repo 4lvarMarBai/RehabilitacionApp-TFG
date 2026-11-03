@@ -106,3 +106,7 @@ class ProfessionCreate(Body):
 
 class ProfessionState(ProfessionCreate):
     active: bool
+
+
+class AISummaryRequest(Body):
+    synthetic_data_confirmed: bool = False
