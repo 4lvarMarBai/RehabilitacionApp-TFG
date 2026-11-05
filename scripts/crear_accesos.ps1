@@ -14,6 +14,14 @@ $shortcut.Description = "Iniciar API, Streamlit y HTTPS"
 $icon = Join-Path $projectRoot "recursos\RehabilitacionIcon.ico"
 if (Test-Path -LiteralPath $icon) { $shortcut.IconLocation = $icon }
 $shortcut.Save()
+# La parada es exclusiva del equipo que aloja los servicios.
+$stopShortcut = $shell.CreateShortcut((Join-Path $desktop "Rehabilitacion - Detener servidor.lnk"))
+$stopShortcut.TargetPath = Join-Path $env:WINDIR "System32\wscript.exe"
+$stopShortcut.Arguments = '"' + (Join-Path $projectRoot "DetenerServidor.vbs") + '"'
+$stopShortcut.WorkingDirectory = $projectRoot
+$stopShortcut.Description = "Detener API, Streamlit y HTTPS de esta instalacion"
+if (Test-Path -LiteralPath $icon) { $stopShortcut.IconLocation = $icon }
+$stopShortcut.Save()
 # El enlace de usuario contiene solo la URL, sin rutas privadas ni credenciales.
 $linkText = "[InternetShortcut]`r`nURL=$url`r`n"
 $encoding = New-Object System.Text.UTF8Encoding($false)

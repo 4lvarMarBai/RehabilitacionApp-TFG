@@ -157,6 +157,7 @@ def audit_event_label(event):
         "ELIMINACION_SESION": "Eliminación de sesión",
         "ELIMINACION_ADMIN_LISTA_ESPERA": "Eliminación administrativa de solicitud",
         "ELIMINACION_ADMIN_TRATAMIENTO": "Eliminación administrativa de tratamiento",
+        "DESACTIVACION_ADMIN_TRATAMIENTO": "Desactivación administrativa de tratamiento",
         "CONSENTIMIENTO_IA": "Decisión sobre el uso de IA",
         "GENERACION_RESUMEN_IA": "Generación de resumen con IA",
     }.get(event, (event or "Evento sin identificar").replace("_", " ").capitalize())

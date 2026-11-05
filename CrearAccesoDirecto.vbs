@@ -10,7 +10,7 @@ If Not fso.FileExists(script) Then
 End If
 result = shell.Run("powershell -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & script & Chr(34), 0, True)
 If result = 0 Then
-    MsgBox "Se han creado los accesos Servidor y Usuario en el escritorio.", vbInformation, "Rehabilitacion"
+    MsgBox "Se han creado los accesos Servidor, Detener servidor y Usuario en el escritorio.", vbInformation, "Rehabilitacion"
 Else
     MsgBox "No se pudieron crear los accesos. Ejecuta scripts\crear_accesos.ps1 desde PowerShell para ver el error.", vbCritical, "Rehabilitacion"
 End If

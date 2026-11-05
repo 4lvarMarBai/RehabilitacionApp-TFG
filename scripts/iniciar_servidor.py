@@ -10,6 +10,7 @@ import subprocess
 import time
 from urllib.request import urlopen
 import webbrowser
+from scripts.procesos_servidor import record_process
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "logs"
@@ -60,6 +61,7 @@ def start_service(name, port, url, command, owned, env=None, secure=False):
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
     owned.append(process)
+    record_process(name, process.pid)
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if process.poll() is not None:

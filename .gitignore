@@ -265,3 +265,6 @@ recursos/certificado_https_local.crt
 # Variables privadas por entorno
 .env.*
 !.env.example
+
+# Pruebas personales: se conservan solo en este equipo
+/tests_api/

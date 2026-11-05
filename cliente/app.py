@@ -1519,7 +1519,8 @@ elif page == "📉 Dashboard clínico":
             "Decisión de consentimiento de IA": "CONSENTIMIENTO_IA",
             "Generación de resumen con IA": "GENERACION_RESUMEN_IA",
             "Eliminación de solicitud": "ELIMINACION_ADMIN_LISTA_ESPERA",
-            "Eliminación de tratamiento": "ELIMINACION_ADMIN_TRATAMIENTO",
+            "Desactivación de tratamiento": "DESACTIVACION_ADMIN_TRATAMIENTO",
+            "Eliminación de tratamiento (histórico)": "ELIMINACION_ADMIN_TRATAMIENTO",
             "Registro de sesión": "REGISTRO_SESION",
             "Modificación de sesión": "MODIFICACION_SESION",
             "Eliminación de sesión": "ELIMINACION_SESION",
@@ -1810,7 +1811,7 @@ elif page == "⚙️ Ajustes":
                     else:
                         st.error(msg)
 
-    with st.expander("⛔ Eliminar tratamiento activo"):
+    with st.expander("⛔ Desactivar tratamiento activo"):
         _, active_rows = get_table(conn, "admin_active", limit=300)
 
         if not active_rows:
@@ -1824,21 +1825,21 @@ elif page == "⚙️ Ajustes":
             }
 
             selected_active = st.selectbox(
-                "Selecciona el tratamiento activo a eliminar",
+                "Selecciona el tratamiento activo a desactivar",
                 list(active_options.keys()),
                 key="admin_delete_active_pick",
             )
 
             confirm_delete_active = st.checkbox(
-                "Confirmo que quiero eliminar este tratamiento y sus sesiones",
+                "Confirmo que quiero desactivar este tratamiento conservando sus sesiones",
                 key="admin_confirm_delete_active",
             )
 
-            if st.button("Eliminar tratamiento", key="admin_delete_active_button"):
+            if st.button("Desactivar tratamiento", key="admin_delete_active_button"):
                 if rol_usuario != "ADMIN":
-                    st.error("Solo el administrador puede eliminar tratamientos.")
+                    st.error("Solo el administrador puede desactivar tratamientos.")
                 elif not confirm_delete_active:
-                    st.error("Debes confirmar la eliminación.")
+                    st.error("Debes confirmar la desactivación.")
                 else:
                     ok, msg = delete_active_treatment(
                         conn, active_options[selected_active], actor_sidebar

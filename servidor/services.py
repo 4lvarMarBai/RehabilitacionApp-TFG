@@ -615,50 +615,64 @@ def add_treatment_session(
     if incidents is not None:
         incidents = incidents.strip()
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO treatment_sessions
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO treatment_sessions
+                    (
+                        rehab_active_id,
+                        patient_id,
+                        specialty,
+                        subspecialty,
+                        session_date,
+                        session_time,
+                        status,
+                        absence_reason,
+                        out_of_schedule_reason,
+                        recorded_by,
+                        created_at,
+                        clinical_note,
+                        pain_eva,
+                        functional_status,
+                        goal_status,
+                        incidents
+                    )
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """,
                 (
                     rehab_active_id,
                     patient_id,
                     specialty,
                     subspecialty,
-                    session_date,
-                    session_time,
+                    session_date_value,
+                    session_time_value,
                     status,
                     absence_reason,
                     out_of_schedule_reason,
                     recorded_by,
                     created_at,
-                    clinical_note,
+                    clinical_note if clinical_note else None,
                     pain_eva,
-                    functional_status,
-                    goal_status,
-                    incidents
+                    functional_status if functional_status else None,
+                    goal_status if goal_status else None,
+                    incidents if incidents else None,
+                ),
+            )
+            session_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO assignment_log (
+                    event, rehab_active_id, session_id, patient_id, specialty,
+                    subspecialty, reason, actor, created_at
                 )
-            VALUES
-                (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-            (
-                rehab_active_id,
-                patient_id,
-                specialty,
-                subspecialty,
-                session_date_value,
-                session_time_value,
-                status,
-                absence_reason,
-                out_of_schedule_reason,
-                recorded_by,
-                created_at,
-                clinical_note if clinical_note else None,
-                pain_eva,
-                functional_status if functional_status else None,
-                goal_status if goal_status else None,
-                incidents if incidents else None,
-            ),
-        )
+                VALUES ('REGISTRO_SESION', %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (rehab_active_id, session_id, patient_id, specialty,
+                 subspecialty, status, recorded_by, created_at),
+            )
 
 
 def get_treatment_sessions(conn, rehab_active_id: int):
@@ -734,14 +748,14 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
         elif status == "FALTA_NO_JUSTIFICADA":
             faltas_no_justificadas += 1
 
-        if pain_eva is not None:
-            pain_values.append(int(pain_eva))
-
-        if functional_status:
-            last_functional_status = functional_status
-
-        if goal_status:
-            last_goal_status = goal_status
+        # Una falta cuenta para la asistencia, pero no es una valoración clínica.
+        if status in {"REALIZADA", "REVISION"}:
+            if pain_eva is not None:
+                pain_values.append(int(pain_eva))
+            if functional_status:
+                last_functional_status = functional_status
+            if goal_status:
+                last_goal_status = goal_status
 
     adherence_denominator = (
         realizadas + revisiones + faltas_justificadas + faltas_no_justificadas
@@ -756,7 +770,7 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
     last_pain = pain_values[-1] if pain_values else None
 
     pain_trend = "Sin datos"
-    if first_pain is not None and last_pain is not None:
+    if len(pain_values) >= 2:
         if last_pain < first_pain:
             pain_trend = "Mejora"
         elif last_pain > first_pain:
@@ -807,7 +821,7 @@ def format_clinical_followup_report(summary):
         "",
     ]
 
-    if summary["first_pain"] is not None and summary["last_pain"] is not None:
+    if summary["pain_trend"] != "Sin datos":
         texto.append(
             f"Evolución del dolor (EVA): inicial {summary['first_pain']} / actual {summary['last_pain']} "
             f"→ tendencia: {summary['pain_trend']}."
@@ -1122,106 +1136,54 @@ def delete_waitlist_entry(conn, waitlist_id: int, actor: str):
 
 
 def delete_active_treatment(conn, rehab_active_id: int, actor: str):
-    """
-    Elimina un tratamiento activo y sus sesiones asociadas, dejando auditoría.
-    Solo debe usarlo un ADMIN.
-    """
+    """Desactiva un tratamiento activo y conserva sus sesiones y su historial."""
     now = now_iso()
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, patient_id, specialty, subspecialty
-                FROM rehab_active
-                WHERE id = %s
-            """,
-                (rehab_active_id,),
-            )
-            row = cur.fetchone()
-
-            if not row:
-                return False, "El tratamiento no existe."
-
-            _, patient_id, specialty, subspecialty = row
-
-            # Registrar la eliminación del tratamiento.
-
-            cur.execute(
-                """
-                INSERT INTO assignment_log
-                    (event, waitlist_id, rehab_active_id, patient_id, specialty, subspecialty,
-                     chosen_priority_level, wait_days, rule_applied, reason, comment, actor, created_at)
-                VALUES
-                    ('DESACTIVACION_ADMIN_TRATAMIENTO', NULL, %s, %s, %s, %s, NULL, NULL, NULL,
-                     'ELIMINADO_POR_ADMIN', 'Tratamiento eliminado por administrador', %s, %s)
-            """,
-                (rehab_active_id, patient_id, specialty, subspecialty, actor, now),
-            )
-
-            # Obtener y registrar las sesiones que se eliminarán.
+            # El bloqueo evita duplicar la auditoría o desactivar un alta simultánea.
             cur.execute(
                 """
                 SELECT id, patient_id, specialty, subspecialty, status
-                FROM treatment_sessions
-                WHERE rehab_active_id = %s
-            """,
+                FROM rehab_active
+                WHERE id = %s
+                FOR UPDATE
+                """,
                 (rehab_active_id,),
             )
-            sesiones = cur.fetchall()
+            row = cur.fetchone()
+            if not row:
+                return False, "El tratamiento no existe."
 
-            for (
-                session_id,
-                session_patient_id,
-                session_specialty,
-                session_subspecialty,
-                session_status,
-            ) in sesiones:
-                cur.execute(
-                    """
-                    INSERT INTO assignment_log (
-                        event,
-                        waitlist_id,
-                        rehab_active_id,
-                        session_id,
-                        patient_id,
-                        specialty,
-                        subspecialty,
-                        reason,
-                        comment,
-                        actor,
-                        created_at
-                    )
-                    VALUES (
-                        'ELIMINACION_SESION',
-                        NULL, %s, %s, %s, %s, %s,
-                        %s, 'Sesión eliminada al eliminar el tratamiento', %s, %s
-                    )
-                """,
-                    (
-                        rehab_active_id,
-                        session_id,
-                        session_patient_id,
-                        session_specialty,
-                        session_subspecialty,
-                        session_status,
-                        actor,
-                        now,
-                    ),
-                )
-
-            # Eliminar las sesiones y después el tratamiento.
+            _, patient_id, specialty, subspecialty, status = row
+            if status != "ACTIVO":
+                return False, "Solo se pueden desactivar tratamientos activos."
 
             cur.execute(
                 """
                 UPDATE rehab_active
                 SET status = 'ELIMINADO_ADMIN'
                 WHERE id = %s
-            """,
+                """,
                 (rehab_active_id,),
             )
+            cur.execute(
+                """
+                INSERT INTO assignment_log (
+                    event, rehab_active_id, patient_id, specialty,
+                    subspecialty, reason, comment, actor, created_at
+                )
+                VALUES (
+                    'DESACTIVACION_ADMIN_TRATAMIENTO', %s, %s, %s, %s,
+                    'DESACTIVADO_POR_ADMIN',
+                    'Tratamiento desactivado; se conservan las sesiones y el historial',
+                    %s, %s
+                )
+                """,
+                (rehab_active_id, patient_id, specialty, subspecialty, actor, now),
+            )
 
-    return True, "Tratamiento eliminado correctamente."
+    return True, "Tratamiento desactivado. Se conservan las sesiones y el historial."
 
 
 def get_patient_pain_series(conn, rehab_active_id: int):
