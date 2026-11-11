@@ -48,7 +48,6 @@ from cliente.api_client import (
     assign_next_patient,
     discharge_patient,
     add_treatment_session,
-    get_treatment_sessions,
     get_session_summary,
     get_stats,
     delete_waitlist_entry,
@@ -61,9 +60,11 @@ from cliente.api_client import (
     get_dashboard_session_summary,
     get_dashboard_adherence_by_specialty,
     get_patient_ai_consent,
+    get_patient_ai_status,
     set_patient_ai_consent,
     generate_ai_clinical_summary,
 )
+from cliente.pagination import paginated_table
 from cliente.ui_helpers import (
     priority_badge,
     specialty_label,
@@ -208,6 +209,7 @@ if st.session_state["user"].get("must_change_password"):
     st.stop()
 
 # -------------------- Variables de usuario y catálogos --------------------
+ai_mode = st.session_state.get("ai_use_mode", "demo")
 usuario_actual = st.session_state["user"]
 actor_sidebar = usuario_actual["dni"]
 rol_usuario = usuario_actual["role"]
@@ -390,9 +392,8 @@ if page == "📊 Panel de control":
             ss_filter_table = st.selectbox(
                 f"Área (tabla - {sp_filter})", ["Todas"] + areas_tabla, key="dash_area"
             )
-        _, rows = get_table(
-            conn,
-            "waiting",
+        _, rows = paginated_table(
+            conn, "waiting", "waiting_list",
             priority=pr_filter,
             eligible_only=(elig_filter == "Solo elegibles"),
             specialty=sp_filter,
@@ -563,7 +564,7 @@ elif page == "📝 Nueva solicitud":
 
     ai_consent_accepted = None
 
-    if is_valid_nhc(patient_id):
+    if ai_mode == "demo" and is_valid_nhc(patient_id):
         consentimiento_actual = get_patient_ai_consent(conn, patient_id)
         opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
         indice = None if consentimiento_actual is None else int(consentimiento_actual)
@@ -670,7 +671,7 @@ elif page == "📝 Nueva solicitud":
             st.error("Introduce el NHC del paciente.")
         elif not is_valid_nhc(patient_id):
             st.error("El NHC debe tener exactamente 6 números.")
-        elif ai_consent_accepted is None:
+        elif ai_mode == "demo" and ai_consent_accepted is None:
             st.error("Selecciona si el paciente acepta o rechaza el uso de IA.")
         elif not selected_specialties:
             st.error("Selecciona al menos una especialidad.")
@@ -761,9 +762,8 @@ elif page == "⚕️ Tratamientos activos":
     if nhc_activos and not is_valid_nhc(nhc_activos):
         st.info("Introduce las 6 cifras del NHC, incluidos los ceros iniciales.")
     else:
-        _, rows = get_table(
-            conn,
-            "active_details",
+        _, rows = paginated_table(
+            conn, "active_details", "active_list",
             **({"patient_id": nhc_activos} if nhc_activos else {}),
         )
         data = [{"NHC": r[1]} for r in rows]
@@ -787,9 +787,8 @@ elif page == "⚕️ Tratamientos activos":
         st.info("Introduce las 6 cifras del NHC, incluidos los ceros iniciales.")
         rowsA = []
     else:
-        _, rowsA = get_table(
-            conn,
-            "active_for_sessions",
+        _, rowsA = paginated_table(
+            conn, "active_for_sessions", "session_treatments",
             **({"patient_id": nhc_sesiones} if nhc_sesiones else {}),
         )
 
@@ -1024,8 +1023,9 @@ elif page == "⚕️ Tratamientos activos":
         )
 
         st.markdown("### Historial del NHC seleccionado")
-        sess_cols, sess_rows = get_treatment_sessions(
-            conn, selected_patient["rehab_active_id"]
+        sess_cols, sess_rows = paginated_table(
+            conn, "session_history", "session_history",
+            rehab_active_id=selected_patient["rehab_active_id"],
         )
 
         sess_data = []
@@ -1053,7 +1053,7 @@ elif page == "⚕️ Tratamientos activos":
             st.info("Todavía no hay sesiones registradas para este NHC.")
 
     st.subheader("Histórico de pacientes con alta")
-    _, rows = get_table(conn, "discharged", limit=300)
+    _, rows = paginated_table(conn, "discharged", "discharged_list")
     data = [{"NHC": r[1]} for r in rows]
     st.dataframe(data, width="stretch", hide_index=True)
 
@@ -1070,9 +1070,8 @@ elif page == "📈 Seguimiento clínico":
         st.info("Introduce las 6 cifras del NHC, incluidos los ceros iniciales.")
         rowsA = []
     else:
-        _, rowsA = get_table(
-            conn,
-            "active_basic",
+        _, rowsA = paginated_table(
+            conn, "active_basic", "followup_treatments",
             **({"patient_id": nhc_busqueda} if nhc_busqueda else {}),
         )
 
@@ -1159,11 +1158,15 @@ elif page == "📈 Seguimiento clínico":
 
         patient_id = selected_patient["patient_id"]
         rehab_id = selected_patient["rehab_active_id"]
-        consentimiento = get_patient_ai_consent(conn, patient_id)
-        # No reutilizar borradores antiguos que carezcan del marcado de demostración.
+        ai_status = get_patient_ai_status(conn, patient_id, rehab_id)
+        consentimiento = ai_status["accepted"]
+        clinical_ai = ai_mode == "clinical"
+        # Vincula el borrador al modo de la instalación y a la decisión vigente.
         metadata_ia = st.session_state.get(f"ai_metadata_{rehab_id}", {})
         if (
-            metadata_ia.get("use_mode") != "demo"
+            metadata_ia.get("use_mode") != ai_mode
+            or consentimiento is not True
+            or metadata_ia.get("consent_version") != ai_status.get("consent_version")
             or metadata_ia.get("ai_generated") is not True
         ):
             for campo_ia in (
@@ -1174,57 +1177,69 @@ elif page == "📈 Seguimiento clínico":
             ):
                 st.session_state.pop(f"{campo_ia}_{rehab_id}", None)
 
-        st.markdown("#### Resumen con IA local — demostración del TFG")
-        st.caption(
-            "La decisión de aceptación se simula con casos ficticios. No se recoge aquí un consentimiento jurídico para tratar datos reales."
-        )
-
-        opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
-        indice = None if consentimiento is None else int(consentimiento)
-
-        decision = st.radio(
-            "Decisión del paciente sobre el uso de IA",
-            opciones,
-            index=indice,
-            key=f"followup_ai_consent_{rehab_id}",
-        )
-
-        if st.button(
-            "Guardar decisión de IA",
-            key=f"save_ai_consent_{rehab_id}",
-        ):
-            if decision is None:
-                st.error("Selecciona aceptar o rechazar.")
+        if ai_status.get("can_manage"):
+            st.markdown("#### Resumen con IA local")
+            if clinical_ai:
+                st.caption("Registra la decisión documentada del paciente según el protocolo del centro.")
             else:
-                set_patient_ai_consent(
-                    conn,
-                    patient_id,
-                    accepted=(decision == opciones[1]),
-                    actor=actor_sidebar,
-                )
-                st.session_state.pop(f"ai_summary_{rehab_id}", None)
-                st.session_state.pop(f"ai_metadata_{rehab_id}", None)
-                st.session_state.pop(f"ai_summary_display_{rehab_id}", None)
-                st.success("Decisión guardada.")
-                st.rerun()
+                st.caption("Demostración del TFG con casos ficticios.")
+
+            opciones = ["No acepta el uso de IA", "Acepta el uso de IA"]
+            indice = None if consentimiento is None else int(consentimiento)
+
+            decision = st.radio(
+                "Decisión del paciente sobre el uso de IA",
+                opciones,
+                index=indice,
+                key=f"followup_ai_consent_{rehab_id}",
+            )
+
+            evidence_reference = ""
+            if clinical_ai and decision == opciones[1]:
+                evidence_reference = st.text_input(
+                    "Referencia del consentimiento documentado", max_chars=80,
+                    key=f"ai_evidence_{rehab_id}",
+                    help="Indica el código interno del documento, sin nombres ni datos clínicos.",
+                ).strip()
+
+            if st.button(
+                "Guardar decisión de IA",
+                key=f"save_ai_consent_{rehab_id}",
+            ):
+                if decision is None:
+                    st.error("Selecciona aceptar o rechazar.")
+                elif clinical_ai and decision == opciones[1] and not evidence_reference:
+                    st.error("Indica la referencia del consentimiento documentado.")
+                else:
+                    set_patient_ai_consent(
+                        conn,
+                        patient_id,
+                        accepted=(decision == opciones[1]),
+                        actor=actor_sidebar,
+                        evidence_reference=evidence_reference,
+                    )
+                    st.session_state.pop(f"ai_summary_{rehab_id}", None)
+                    st.session_state.pop(f"ai_metadata_{rehab_id}", None)
+                    st.session_state.pop(f"ai_summary_display_{rehab_id}", None)
+                    st.success("Decisión guardada.")
+                    st.rerun()
 
         if consentimiento is True:
-            st.warning(
-                "IA experimental para el TFG: utiliza solo informes ficticios. El resultado puede contener errores, omisiones o sesgos y no está autorizado para atender pacientes reales."
-            )
-            with st.expander("Antes de utilizar el resumen"):
-                st.write(
-                    "Comprueba las fuentes, fechas y datos ausentes. El modelo no decide prioridades, altas ni cambios de tratamiento. La aceptación simulada no sustituye una base jurídica ni una autorización del hospital. La ocultación de algunos identificadores no garantiza anonimización."
+            synthetic_confirmed = False
+            if clinical_ai:
+                st.warning(
+                    "Borrador generado por IA. Contrasta las fuentes y verifica los datos antes de utilizarlo."
                 )
-            synthetic_confirmed = st.checkbox(
-                "Confirmo que este caso y sus informes son ficticios y que no usaré el resultado para atender pacientes reales",
-                key=f"ai_demo_confirm_{rehab_id}",
-            )
+            else:
+                synthetic_confirmed = st.checkbox(
+                    "Confirmo que este caso y sus informes son ficticios y que no usaré el resultado para atender pacientes reales",
+                    key=f"ai_demo_confirm_{rehab_id}",
+                )
 
             if st.button(
                 "Generar resumen con IA local",
                 key=f"ai_summary_btn_{rehab_id}",
-                disabled=not synthetic_confirmed,
+                disabled=not (clinical_ai or synthetic_confirmed),
             ):
                 try:
                     with st.spinner("Generando resumen local..."):
@@ -1247,34 +1262,41 @@ elif page == "📈 Seguimiento clínico":
                     "Contrasta el resultado con los informes originales."
                 )
                 st.text_area(
-                    "Resumen, valoraciones y aspectos para revisar",
+                    "Borrador generado por IA",
                     value=st.session_state[f"ai_summary_{rehab_id}"],
                     height=400,
+                    disabled=clinical_ai,
                     key=f"ai_summary_display_{rehab_id}",
                 )
-                st.download_button(
-                    "Descargar borrador identificado como IA (JSON)",
-                    data=json.dumps(
-                        {
-                            "summary": st.session_state[f"ai_summary_{rehab_id}"],
-                            "metadata": st.session_state.get(
-                                f"ai_metadata_{rehab_id}", {}
-                            ),
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    file_name="borrador_ia_demostracion.json",
-                    mime="application/json",
-                    key=f"ai_download_{rehab_id}",
-                )
+                if not clinical_ai:
+                    st.download_button(
+                        "Descargar borrador identificado como IA (JSON)",
+                        data=json.dumps(
+                            {
+                                "summary": st.session_state[f"ai_summary_{rehab_id}"],
+                                "metadata": st.session_state.get(
+                                    f"ai_metadata_{rehab_id}", {}
+                                ),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        file_name="borrador_ia_demostracion.json",
+                        mime="application/json",
+                        key=f"ai_download_{rehab_id}",
+                    )
+        elif ai_status.get("can_manage"):
+            st.info("La generación requiere el consentimiento documentado para este modo.")
+        elif clinical_ai:
+            st.info("La generación clínica está reservada al profesional asignado al tratamiento.")
         else:
-            st.info("No consta aceptación; los informes no se procesarán con IA.")
+            st.info("La generación con IA está deshabilitada.")
 
         st.markdown("### Historial clínico de sesiones")
 
-        sess_cols, sess_rows = get_treatment_sessions(
-            conn, selected_patient["rehab_active_id"]
+        sess_cols, sess_rows = paginated_table(
+            conn, "session_history", "followup_history",
+            rehab_active_id=selected_patient["rehab_active_id"],
         )
 
         sess_data = []
@@ -1545,13 +1567,11 @@ elif page == "📉 Dashboard clínico":
         if evento_nhc and not is_valid_nhc(evento_nhc):
             st.info("Introduce las 6 cifras del NHC.")
         else:
-            _, eventos = get_table(
-                conn,
-                "audit",
+            _, eventos = paginated_table(
+                conn, "audit", "dashboard_events",
                 patient_id=evento_nhc or None,
                 event=eventos_disponibles[motivo_evento],
                 ai_consent=consentimientos[decision_ia],
-                limit=400,
             )
             filas_eventos = [
                 {
@@ -1631,16 +1651,14 @@ elif page == "🧾 Auditoría clínica":
         st.info("Introduce las 6 cifras del NHC, incluidos los ceros iniciales.")
         rows = []
     else:
-        _, rows = get_table(
-            conn,
-            "audit",
+        _, rows = paginated_table(
+            conn, "audit", "audit_list",
             priority=audit_pr_filter,
             eligible_only=(audit_elig_filter == "Solo elegibles"),
             specialty=audit_sp_filter,
             subspecialty=audit_ss_filter,
             patient_id=busqueda_nhc_audit or None,
             ai_consent=opciones_consentimiento_audit[consentimiento_audit],
-            limit=400,
         )
 
     motivos_alta = {

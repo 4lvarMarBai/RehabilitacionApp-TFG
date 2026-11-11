@@ -5,11 +5,14 @@ from servidor.database import fetch_all, now_iso
 from comun.validators import validar_regla_coordinacion, validar_dias_asistencia
 from servidor.ai_clinical import resumir_informes
 from servidor.ai_policy import (
-    require_demo,
+    ai_use_mode,
+    clinical_consent_version,
+    require_summary_mode,
     redact_text,
     minimize_payload,
     digest,
     PROMPT_VERSION,
+    CLINICAL_PROMPT_VERSION,
 )
 
 
@@ -147,7 +150,7 @@ def add_waiting_patient_multiple(
     ai_consent_accepted: bool | None = None,
 ):
     """Guarda el consentimiento y una solicitud por tratamiento en una misma transacción."""
-    if ai_consent_accepted is None:
+    if ai_use_mode() == "demo" and ai_consent_accepted is None:
         raise ValueError(
             "Debe registrarse la decisión del paciente sobre el uso de IA."
         )
@@ -156,48 +159,8 @@ def add_waiting_patient_multiple(
 
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO patient_ai_consent (
-                    patient_id, accepted, decided_at, decided_by, consent_version
-                )
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (patient_id) DO UPDATE SET
-                    accepted = EXCLUDED.accepted,
-                    decided_at = EXCLUDED.decided_at,
-                    decided_by = EXCLUDED.decided_by,
-                    consent_version = EXCLUDED.consent_version
-            """,
-                (
-                    patient_id,
-                    ai_consent_accepted,
-                    now,
-                    actor,
-                    "software-v1",
-                ),
-            )
-
-            cur.execute(
-                """
-                INSERT INTO assignment_log (
-                    event, patient_id, reason, comment, actor, created_at
-                )
-                VALUES (
-                    'CONSENTIMIENTO_IA',
-                    %s,
-                    'DECISION_CONSENTIMIENTO_IA',
-                    %s,
-                    %s,
-                    %s
-                )
-            """,
-                (
-                    patient_id,
-                    "ACEPTADO" if ai_consent_accepted else "RECHAZADO",
-                    actor,
-                    now,
-                ),
-            )
+            if ai_use_mode() == "demo":
+                set_patient_ai_consent(conn, patient_id, ai_consent_accepted, actor)
 
             for req in requests:
                 cur.execute(
@@ -860,23 +823,45 @@ def format_clinical_followup_report(summary):
     return "\n".join(texto)
 
 
-def get_patient_ai_consent(conn, patient_id: str) -> bool | None:
+def has_clinical_assignment(conn, patient_id, actor, rehab_id=None):
+    _, rows = fetch_all(
+        conn,
+        """
+        SELECT 1 FROM rehab_active
+        WHERE patient_id = %s AND assigned_clinician_dni = %s AND status = 'ACTIVO'
+          AND (%s::bigint IS NULL OR id = %s)
+        LIMIT 1
+        """,
+        (patient_id, actor, rehab_id, rehab_id),
+    )
+    return bool(rows)
+
+
+def get_patient_ai_consent(conn, patient_id: str, *, version="software-v1") -> bool | None:
     """Consulta la decisión vigente del paciente; la ausencia no equivale a aceptación."""
     _, rows = fetch_all(
         conn,
         """
         SELECT accepted
         FROM patient_ai_consent
-        WHERE patient_id = %s
+        WHERE patient_id = %s AND consent_version = %s
     """,
-        (patient_id,),
+        (patient_id, version),
     )
     return None if not rows else bool(rows[0][0])
 
 
-def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
+def set_patient_ai_consent(
+    conn, patient_id: str, accepted: bool, actor: str, *,
+    version="software-v1", evidence_reference=None,
+):
     """Guarda la decisión del paciente y deja constancia de quién la registró."""
     now = now_iso()
+    decision = "ACEPTADO" if accepted else "RECHAZADO"
+    if version != "software-v1":
+        decision = f"{decision}, protocolo={version}"
+        if evidence_reference:
+            decision += f", referencia={evidence_reference}"
 
     with conn.transaction():
         with conn.cursor() as cur:
@@ -892,7 +877,7 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
                     decided_by = EXCLUDED.decided_by,
                     consent_version = EXCLUDED.consent_version
             """,
-                (patient_id, accepted, now, actor, "software-v1"),
+                (patient_id, accepted, now, actor, version),
             )
 
             cur.execute(
@@ -907,7 +892,7 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
             """,
                 (
                     patient_id,
-                    "ACEPTADO" if accepted else "RECHAZADO",
+                    decision,
                     actor,
                     now,
                 ),
@@ -915,10 +900,14 @@ def set_patient_ai_consent(conn, patient_id: str, accepted: bool, actor: str):
 
 
 def generate_ai_clinical_summary(
-    conn, rehab_active_id: int, actor: str, *, synthetic_data_confirmed=False
+    conn, rehab_active_id: int, actor: str, *, synthetic_data_confirmed=False,
+    role=None,
 ):
-    """Comprueba el consentimiento antes de enviar los informes al modelo local."""
-    require_demo(synthetic_data_confirmed)
+    """Comprueba el acceso y el consentimiento antes de generar el borrador."""
+    mode = require_summary_mode(synthetic_data_confirmed)
+    clinical = mode == "clinical"
+    if clinical and role != "CLINICO":
+        raise PermissionError("La generación clínica requiere el perfil de profesional clínico.")
     _, treatment_rows = fetch_all(
         conn,
         """
@@ -934,8 +923,11 @@ def generate_ai_clinical_summary(
 
     patient_id, specialty, subspecialty = treatment_rows[0]
 
-    if get_patient_ai_consent(conn, patient_id) is not True:
-        raise PermissionError("No consta consentimiento aceptado para usar IA.")
+    consent_options = {"version": clinical_consent_version()} if clinical else {}
+    if clinical and not has_clinical_assignment(conn, patient_id, actor, rehab_active_id):
+        raise PermissionError("Solo el profesional asignado puede generar este borrador.")
+    if get_patient_ai_consent(conn, patient_id, **consent_options) is not True:
+        raise PermissionError("No consta consentimiento aceptado para el modo de IA actual.")
 
     _, rows = fetch_all(
         conn,
@@ -973,16 +965,21 @@ def generate_ai_clinical_summary(
         for index, row in enumerate(rows)
     ]
 
-    indicadores = minimize_payload(
-        get_clinical_followup_summary(conn, rehab_active_id), patient_id
-    )
+    indicadores = {}
+    if not clinical:
+        indicadores = minimize_payload(
+            get_clinical_followup_summary(conn, rehab_active_id), patient_id
+        )
 
     resumen, modelo = resumir_informes(
         informes=informes,
         indicadores=indicadores,
+        **({"clinical": True} if clinical else {}),
     )
 
-    if get_patient_ai_consent(conn, patient_id) is not True:
+    if clinical and not has_clinical_assignment(conn, patient_id, actor, rehab_active_id):
+        raise PermissionError("El tratamiento ya no está asignado al profesional solicitante.")
+    if get_patient_ai_consent(conn, patient_id, **consent_options) is not True:
         raise PermissionError(
             "La aceptación se ha retirado durante la generación. No se mostrará el resultado."
         )
@@ -1005,7 +1002,7 @@ def generate_ai_clinical_summary(
                     patient_id,
                     specialty,
                     subspecialty,
-                    f"Modelo {modelo}; prompt={PROMPT_VERSION}; modo=demo; fuentes={len(informes)}; entrada_sha256={digest({'informes': informes, 'indicadores': indicadores})}; salida_sha256={digest(resumen)}",
+                    f"Modelo {modelo}; prompt={CLINICAL_PROMPT_VERSION if clinical else PROMPT_VERSION}; modo={mode}; protocolo={consent_options.get('version', 'software-v1')}; fuentes={len(informes)}; entrada_sha256={digest({'informes': informes, 'indicadores': indicadores})}; salida_sha256={digest(resumen)}",
                     actor,
                     now_iso(),
                 ),

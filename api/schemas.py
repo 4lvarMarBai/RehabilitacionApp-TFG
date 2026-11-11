@@ -37,7 +37,7 @@ class WaitingRequest(Body):
     transport_mode: Literal["NORMAL", "AMBULANCIA"]
     preferred_hour: str | None = Field(default=None, max_length=5)
     coordination_rule: Literal["NINGUNA", "MISMO_DIA", "DIAS_ALTERNOS"]
-    ai_consent_accepted: bool
+    ai_consent_accepted: bool | None = None
 
 
 class Assignment(Body):
@@ -71,6 +71,9 @@ class Discharge(Body):
 
 class Consent(Body):
     accepted: bool
+    evidence_reference: str | None = Field(
+        default=None, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    )
 
 
 class UserCreate(Body):

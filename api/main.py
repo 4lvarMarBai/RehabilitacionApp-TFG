@@ -14,7 +14,7 @@ from psycopg_pool import PoolTimeout
 from servidor import auth
 from servidor import catalogos as cat
 from servidor import services as svc
-from servidor.ai_clinical import OllamaError
+from servidor.ai_clinical import OllamaError, OllamaTimeoutError
 from api.db import get_conn, lifespan
 from api.queries import read_table
 from api.schemas import (
@@ -34,7 +34,10 @@ from api.schemas import (
     ProfessionState,
 )
 from api.schemas import AISummaryRequest
-from servidor.ai_policy import require_demo, PROMPT_VERSION, digest
+from servidor.ai_policy import (
+    ai_use_mode, clinical_consent_version, require_summary_mode,
+    PROMPT_VERSION, CLINICAL_PROMPT_VERSION, digest,
+)
 from api.security import (
     admin_user,
     bearer,
@@ -85,6 +88,16 @@ async def invalid_operation(_request: Request, exc: ValueError):
 @app.exception_handler(PermissionError)
 async def forbidden_operation(_request: Request, exc: PermissionError):
     return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
+@app.exception_handler(OllamaTimeoutError)
+async def ai_timeout(_request: Request, _exc: OllamaTimeoutError):
+    return JSONResponse(
+        status_code=504,
+        content={
+            "detail": "Ollama tardó demasiado en generar el informe. Vuelve a intentarlo más tarde."
+        },
+    )
 
 
 @app.exception_handler(OllamaError)
@@ -166,6 +179,7 @@ def bootstrap(
         raise HTTPException(403, "Rol no autorizado.")
     result = {
         "user": user,
+        "ai_use_mode": ai_use_mode(),
         "specialties": encode(cat.get_especialidades(conn, only_active=False)),
     }
     if include_stats:
@@ -260,28 +274,31 @@ def tables(
     year: int | None = Query(default=None, ge=2020, le=2100),
     month: int | None = Query(default=None, ge=1, le=12),
     limit: int = Query(default=1000, ge=1, le=5000),
+    page: int | None = Query(default=None, ge=1, le=1_000_000_000),
+    page_size: int = Query(default=50, ge=1, le=100),
     user=Depends(ready_user),
     conn=Depends(get_conn),
 ):
-    return table(
-        read_table(
-            conn,
-            name,
-            user,
-            specialty=specialty,
-            subspecialty=subspecialty,
-            priority=priority,
-            eligible_only=eligible_only,
-            dni=dni,
-            patient_id=patient_id,
-            event=event,
-            ai_consent=ai_consent,
-            rehab_active_id=rehab_active_id,
-            year=year,
-            month=month,
-            limit=limit,
-        )
+    result = read_table(
+        conn,
+        name,
+        user,
+        specialty=specialty,
+        subspecialty=subspecialty,
+        priority=priority,
+        eligible_only=eligible_only,
+        dni=dni,
+        patient_id=patient_id,
+        event=event,
+        ai_consent=ai_consent,
+        rehab_active_id=rehab_active_id,
+        year=year,
+        month=month,
+        limit=limit,
+        page=page,
+        page_size=page_size,
     )
+    return encode(result) if page is not None else table(result)
 
 
 @app.get("/requests/preview")
@@ -451,8 +468,16 @@ def add_session(
 
 
 @app.get("/treatments/{rehab_id}/sessions")
-def sessions(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def sessions(
+    rehab_id: int,
+    page: int | None = Query(default=None, ge=1, le=1_000_000_000),
+    page_size: int = Query(default=50, ge=1, le=100),
+    _user=Depends(ready_user), conn=Depends(get_conn),
+):
     treatment(conn, rehab_id, viewer=_user)
+    if page is not None:
+        return encode(read_table(conn, "session_history", _user,
+                                 rehab_active_id=rehab_id, page=page, page_size=page_size))
     return table(svc.get_treatment_sessions(conn, rehab_id))
 
 
@@ -511,10 +536,28 @@ def dashboard(name: str, _user=Depends(ready_user), conn=Depends(get_conn)):
 
 
 @app.get("/patients/{patient_id}/ai-consent")
-def get_consent(patient_id: str, _user=Depends(ready_user), conn=Depends(get_conn)):
+def get_consent(
+    patient_id: str,
+    rehab_id: int | None = Query(default=None, ge=1),
+    user=Depends(ready_user),
+    conn=Depends(get_conn),
+):
     if len(patient_id) != 6 or not patient_id.isascii() or not patient_id.isdigit():
         raise HTTPException(422, "El NHC debe tener seis cifras.")
-    return {"accepted": svc.get_patient_ai_consent(conn, patient_id)}
+    mode = ai_use_mode()
+    if mode == "demo":
+        return {"accepted": svc.get_patient_ai_consent(conn, patient_id), "can_manage": True}
+    allowed = (
+        mode == "clinical"
+        and user["role"] == "CLINICO"
+        and svc.has_clinical_assignment(conn, patient_id, user["dni"], rehab_id)
+    )
+    return {
+        "can_manage": allowed,
+        "consent_version": clinical_consent_version() if allowed else None,
+        "accepted": svc.get_patient_ai_consent(conn, patient_id, version=clinical_consent_version())
+        if allowed else None,
+    }
 
 
 @app.put("/patients/{patient_id}/ai-consent")
@@ -523,7 +566,22 @@ def save_consent(
 ):
     if len(patient_id) != 6 or not patient_id.isascii() or not patient_id.isdigit():
         raise HTTPException(422, "El NHC debe tener seis cifras.")
-    svc.set_patient_ai_consent(conn, patient_id, body.accepted, user["dni"])
+    mode = ai_use_mode()
+    if mode == "disabled":
+        raise PermissionError("La IA está deshabilitada.")
+    if mode == "clinical":
+        if user["role"] != "CLINICO" or not svc.has_clinical_assignment(
+            conn, patient_id, user["dni"]
+        ):
+            raise PermissionError("Se requiere una asignación clínica activa para este paciente.")
+        if body.accepted and not body.evidence_reference:
+            raise HTTPException(422, "Indica la referencia del consentimiento explícito documentado.")
+        svc.set_patient_ai_consent(
+            conn, patient_id, body.accepted, user["dni"],
+            version=clinical_consent_version(), evidence_reference=body.evidence_reference,
+        )
+    else:
+        svc.set_patient_ai_consent(conn, patient_id, body.accepted, user["dni"])
     return {"ok": True}
 
 
@@ -534,7 +592,9 @@ def ai_summary(
     user=Depends(ready_user),
     conn=Depends(get_conn),
 ):
-    require_demo(body.synthetic_data_confirmed)
+    mode = require_summary_mode(body.synthetic_data_confirmed)
+    if mode == "clinical" and user["role"] != "CLINICO":
+        raise PermissionError("La generación clínica requiere el perfil de profesional clínico.")
     if not ai_slot.acquire(blocking=False):
         raise HTTPException(
             429, "Ya hay un informe de IA en proceso. Inténtalo después."
@@ -546,17 +606,19 @@ def ai_summary(
             rehab_id,
             actor=user["dni"],
             synthetic_data_confirmed=body.synthetic_data_confirmed,
+            role=user["role"],
         )
         return {
             "summary": summary,
             "model": model,
             "metadata": {
                 "ai_generated": True,
-                "use_mode": "demo",
-                "synthetic_data_confirmed": True,
-                "prompt_version": PROMPT_VERSION,
+                "use_mode": mode,
+                "consent_version": clinical_consent_version() if mode == "clinical" else None,
+                "synthetic_data_confirmed": mode == "demo",
+                "prompt_version": CLINICAL_PROMPT_VERSION if mode == "clinical" else PROMPT_VERSION,
                 "human_review_required": True,
-                "clinical_use_authorized": False,
+                **({"clinical_use_authorized": False} if mode == "demo" else {}),
                 "summary_sha256": digest(summary),
                 "generated_at": datetime.now(UTC).isoformat(),
             },

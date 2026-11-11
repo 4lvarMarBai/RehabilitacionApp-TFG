@@ -145,6 +145,16 @@ def get_table(conn, name, **filters):
     return result["columns"], result["rows"]
 
 
+
+def get_table_page(conn, name, *, page=1, page_size=50, **filters):
+    """Solicita solo una página; los indicadores y resúmenes siguen usando todos los datos."""
+    if name == "session_history":
+        path = f"/treatments/{filters.pop('rehab_active_id')}/sessions"
+    else:
+        path = f"/tables/{name}"
+    return _request("GET", path, params={**filters, "page": page, "page_size": page_size})
+
+
 def authenticate_user(conn, username, password):
     """Envía las credenciales al servidor y conserva el token de la sesión."""
     result = _request(
@@ -169,6 +179,7 @@ def get_current_session_user():
             == "📊 Panel de control"
         },
     )
+    st.session_state["ai_use_mode"] = result.get("ai_use_mode", "demo")
     cache = st.session_state.setdefault("_api_run_cache", {})
     for path, params, key in (
         ("/stats", {}, "stats"),
@@ -433,10 +444,16 @@ def get_patient_ai_consent(conn, patient_id):
     return _request("GET", f"/patients/{patient_id}/ai-consent")["accepted"]
 
 
-def set_patient_ai_consent(conn, patient_id, accepted, actor):
-    """Guarda la decisión del paciente y deja constancia de quién la registró."""
+def get_patient_ai_status(conn, patient_id, rehab_id):
     return _request(
-        "PUT", f"/patients/{patient_id}/ai-consent", data={"accepted": accepted}
+        "GET", f"/patients/{patient_id}/ai-consent", params={"rehab_id": rehab_id}
+    )
+
+
+def set_patient_ai_consent(conn, patient_id, accepted, actor, *, evidence_reference=None):
+    return _request(
+        "PUT", f"/patients/{patient_id}/ai-consent",
+        data={"accepted": accepted, "evidence_reference": evidence_reference or None},
     )
 
 
@@ -448,7 +465,7 @@ def generate_ai_clinical_summary(
         "POST",
         f"/treatments/{rehab_active_id}/ai-summary",
         data={"synthetic_data_confirmed": synthetic_data_confirmed},
-        timeout=240,
+        timeout=540,
     )
     st.session_state[f"ai_metadata_{rehab_active_id}"] = result.get("metadata", {})
     return result["summary"], result["model"]

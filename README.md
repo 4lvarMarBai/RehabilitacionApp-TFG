@@ -4,6 +4,30 @@ Aplicación para gestionar solicitudes de rehabilitación, organizar la lista de
 
 Incluye acceso por roles de administrador y clínico, gestión de usuarios y catálogos, auditoría y generación de resúmenes con IA mediante Ollama. La IA requiere la aceptación registrada del paciente y sus resultados deben ser revisados por un profesional.
 
+## Módulos del repositorio
+
+El navegador accede a Streamlit a través de Caddy. Streamlit consulta la API de FastAPI y esta utiliza PostgreSQL y, al generar un resumen, Ollama.
+
+| Carpeta | Módulos principales |
+| --- | --- |
+| `cliente/` | `app.py` contiene las pantallas. `api_client.py` comunica Streamlit con la API. `pagination.py` y `ui_helpers.py` reúnen los controles de paginación y otras utilidades de interfaz. |
+| `api/` | `main.py` define las rutas. `schemas.py` valida las peticiones y `security.py` comprueba sesiones y permisos. `db.py` gestiona las conexiones e `init_db.py` prepara la base de datos. `queries.py`, `pagination.py` y `serialization.py` preparan los datos que devuelve la API. |
+| `servidor/` | `services.py` aplica las reglas de rehabilitación. `database.py`, `auth.py` y `catalogos.py` gestionan la persistencia, los usuarios y los catálogos. `ai_policy.py` aplica las restricciones de IA y `ai_clinical.py` solicita y prepara los borradores de Ollama. |
+| `comun/` | `config.py` reúne constantes como prioridades y turnos. `validators.py` contiene las validaciones compartidas. |
+| `scripts/` | Arranque y parada del servidor, preparación de accesos directos y exportación del certificado HTTPS. Los archivos `.vbs` de la raíz ejecutan las operaciones de arranque, parada y creación de accesos. |
+| `configuracion/` | Configuración de la API y de Caddy en el equipo servidor. |
+| `recursos/` | Icono y, tras ejecutar los scripts de preparación, certificado público y enlace de acceso. |
+| `docs/` | Manual técnico e instrucciones de instalación y operación. |
+
+| Componente | Dónde se configura |
+| --- | --- |
+| API y PostgreSQL | En `configuracion/.env.api`, mediante `DATABASE_URL` y `ADMIN_INITIAL_PASSWORD` para el primer arranque. |
+| Streamlit | En `.streamlit/secrets.toml`, mediante `API_BASE_URL`. También se puede indicar como variable de entorno. |
+| Caddy | En `configuracion/Caddyfile`, donde se establece la dirección HTTPS y el destino interno de Streamlit. |
+| Ollama | La API lee `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT` y el modo de uso de IA desde `configuracion/.env.api`. Las opciones del propio proceso de Ollama, como `OLLAMA_NO_CLOUD`, se configuran en el equipo servidor. |
+
+Consulta el [manual técnico](docs/Manual_tecnico_instalacion.md) para los detalles de instalación y los requisitos del modo clínico.
+
 ## Requisitos
 
 - Python 3.11 o posterior.
@@ -60,3 +84,19 @@ El administrador crea los usuarios, que acceden con su DNI y una contraseña tem
 ## Datos y seguridad
 
 PostgreSQL almacena los datos y solo la API utiliza sus credenciales. No subas a Git contraseñas, archivos de secretos ni bases de datos con información de pacientes. El acceso HTTP en la red local se destina a pruebas con datos ficticios; utiliza HTTPS para trabajar con datos reales.
+
+## Resúmenes con datos reales
+
+El modo predeterminado de la IA es `demo`. El modo clínico ofrece un borrador documental para que el profesional asignado lo contraste con las sesiones originales. La aplicación conserva la decisión del paciente y la referencia al consentimiento explícito documentado conforme al protocolo del centro.
+
+El centro debe validar la finalidad, la seguridad del despliegue y la calidad de los resúmenes antes de habilitar este modo. Debe determinar si el consentimiento es la base adecuada y si el uso previsto está sujeto a la normativa de producto sanitario. La referencia del protocolo es un dato de configuración. El centro conserva la documentación que respalda esa referencia.
+
+En Ollama, deshabilita las funciones de nube con `OLLAMA_NO_CLOUD=1` en el entorno del proceso de Ollama. Reinícialo y verifica que el registro indique `Ollama cloud disabled: true`. Tras verificar el despliegue y disponer de la autorización del centro, añade a `configuracion/.env.api` estas variables y reinicia la API y Streamlit:
+
+```ini
+AI_USE_MODE=clinical
+AI_CLINICAL_PROTOCOL=REFERENCIA_DEL_PROTOCOLO_APROBADO
+AI_LOCAL_ONLY_CONFIRMED=true
+```
+
+La comprobación de asignación se aplica a la generación del resumen clínico. Revisa también los permisos de acceso a pacientes en las demás pantallas antes de utilizar la aplicación con datos reales.

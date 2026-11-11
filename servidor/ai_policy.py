@@ -7,7 +7,37 @@ import re
 from urllib.parse import urlsplit
 
 PROMPT_VERSION = "tfg-demo-2026-11-02-v1"
+CLINICAL_PROMPT_VERSION = "clinical-summary-v1"
 MAX_INPUT_CHARS = 24000
+
+
+def clinical_consent_version():
+    protocol = os.getenv("AI_CLINICAL_PROTOCOL", "").strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,79}", protocol):
+        return f"clinical:{protocol}"
+    return None
+
+
+def ai_use_mode():
+    mode = os.getenv("AI_USE_MODE", "demo").strip().lower()
+    if mode == "demo":
+        return mode
+    if (
+        mode == "clinical"
+        and clinical_consent_version()
+        and os.getenv("AI_LOCAL_ONLY_CONFIRMED", "").strip().lower() == "true"
+    ):
+        return mode
+    return "disabled"
+
+
+def require_summary_mode(synthetic_data_confirmed):
+    mode = ai_use_mode()
+    if mode == "disabled":
+        raise PermissionError("La generación de resúmenes con IA está deshabilitada.")
+    if mode == "demo":
+        require_demo(synthetic_data_confirmed)
+    return mode
 
 
 def require_demo(synthetic_data_confirmed):
