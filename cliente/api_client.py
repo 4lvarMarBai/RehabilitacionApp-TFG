@@ -150,6 +150,8 @@ def get_table_page(conn, name, *, page=1, page_size=50, **filters):
     """Solicita solo una página; los indicadores y resúmenes siguen usando todos los datos."""
     if name == "session_history":
         path = f"/treatments/{filters.pop('rehab_active_id')}/sessions"
+    elif name in {"users", "clinical_visits"}:
+        path = "/admin/users" if name == "users" else "/admin/visits"
     else:
         path = f"/tables/{name}"
     return _request("GET", path, params={**filters, "page": page, "page_size": page_size})

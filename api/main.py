@@ -16,6 +16,7 @@ from servidor import catalogos as cat
 from servidor import services as svc
 from servidor.ai_clinical import OllamaError, OllamaTimeoutError
 from api.db import get_conn, lifespan
+from api.pagination import paginate_query
 from api.queries import read_table
 from api.schemas import (
     AreaCreate,
@@ -628,7 +629,23 @@ def ai_summary(
 
 
 @app.get("/admin/users")
-def users(_admin=Depends(admin_user), conn=Depends(get_conn)):
+def users(
+    page: int | None = Query(default=None, ge=1, le=1_000_000_000),
+    page_size: int = Query(default=50, ge=1, le=100),
+    exclude_current: bool = False,
+    admin=Depends(admin_user),
+    conn=Depends(get_conn),
+):
+    if page is not None:
+        query = auth.USER_LIST_QUERY
+        params = ()
+        if exclude_current:
+            query += " WHERE id <> %s"
+            params = (admin["id"],)
+        return encode(paginate_query(
+            conn, query, params, order_by="username ASC, id ASC",
+            page=page, page_size=page_size,
+        ))
     return encode(auth.get_all_users(conn))
 
 
@@ -783,6 +800,8 @@ def clinical_visits(
     patient_id: str | None = Query(default=None, pattern=r"^[0-9]{6}$"),
     clinician_dni: str | None = Query(default=None, max_length=20),
     limit: int = Query(default=1000, ge=1, le=5000),
+    page: int | None = Query(default=None, ge=1, le=1_000_000_000),
+    page_size: int = Query(default=50, ge=1, le=100),
     _admin=Depends(admin_user),
     conn=Depends(get_conn),
 ):
@@ -795,10 +814,16 @@ def clinical_visits(
         conditions.append("clinician_dni = %s")
         params.append(clinician_dni.strip().upper())
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    query = f"SELECT clinician_dni, patient_id, visit_date FROM clinical_visit_log {where}"
+    order = "visit_date DESC, clinician_dni, patient_id"
+    if page is not None:
+        return encode(paginate_query(
+            conn, query, tuple(params), order_by=order, page=page, page_size=page_size,
+        ))
     return table(
         fetch_all(
             conn,
-            f"SELECT clinician_dni, patient_id, visit_date FROM clinical_visit_log {where} ORDER BY visit_date DESC, clinician_dni, patient_id LIMIT %s",
+            f"{query} ORDER BY {order} LIMIT %s",
             (*params, limit),
         )
     )

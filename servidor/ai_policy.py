@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 PROMPT_VERSION = "tfg-demo-2026-11-02-v1"
-CLINICAL_PROMPT_VERSION = "clinical-summary-v1"
+CLINICAL_PROMPT_VERSION = "clinical-summary-v12"
 MAX_INPUT_CHARS = 24000
 
 

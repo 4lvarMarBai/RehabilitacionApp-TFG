@@ -19,7 +19,6 @@ from comun.config import (
 )
 from cliente.api_client import (
     get_table,
-    get_clinical_visits,
     begin_api_run,
     iso_utc_from_date,
     get_current_session_user,
@@ -77,7 +76,6 @@ from cliente.ui_helpers import (
 from cliente.api_client import (
     authenticate_user,
     create_user,
-    get_all_users,
     change_user_password,
     reset_user_password_to_default,
     get_professions,
@@ -472,7 +470,7 @@ if page == "📊 Panel de control":
 
         st.divider()
         st.caption("Formalización del alta de un tratamiento activo.")
-        _, rowsA = get_table(conn, "active_basic")
+        _, rowsA = paginated_table(conn, "active_basic", "discharge_treatments")
         if not rowsA:
             st.info("No hay pacientes activos.")
         else:
@@ -1351,9 +1349,10 @@ elif page == "📉 Dashboard clínico":
             st.info("Introduce las 6 cifras del NHC, incluidos los ceros iniciales.")
             rowsA = []
         else:
-            _, rowsA = get_table(
+            _, rowsA = paginated_table(
                 conn,
                 "active_basic",
+                "dashboard_treatments",
                 **({"patient_id": nhc_busqueda} if nhc_busqueda else {}),
             )
 
@@ -1717,8 +1716,9 @@ elif page == "📖 Registro de visitas":
     if filtro_nhc and not is_valid_nhc(filtro_nhc):
         st.info("Introduce las 6 cifras del NHC.")
     else:
-        _, visitas = get_clinical_visits(
-            conn, patient_id=filtro_nhc or None, clinician_dni=filtro_dni or None
+        _, visitas = paginated_table(
+            conn, "clinical_visits", "clinical_visits",
+            patient_id=filtro_nhc or None, clinician_dni=filtro_dni or None,
         )
         datos_visitas = [
             {
@@ -1752,11 +1752,12 @@ elif page == "⚙️ Ajustes":
 
     st.markdown("### Restablecer contraseña de usuario")
 
-    usuarios_reset = get_all_users(conn)
+    _, usuarios_reset = paginated_table(
+        conn, "users", "reset_users", exclude_current=True,
+    )
     usuarios_reset_options = {
         f"{u[0]} · {u[1]} · {u[2]} · {u[3]} · {u[4]} · {u[5]}": u[0]
         for u in usuarios_reset
-        if u[0] != usuario_actual["id"]
     }
 
     if usuarios_reset_options:
@@ -1768,7 +1769,7 @@ elif page == "⚙️ Ajustes":
 
         confirm_reset_password = st.checkbox(
             "Confirmo que quiero generar una nueva contraseña temporal",
-            key="confirm_reset_password",
+            key=f"confirm_reset_password_{usuarios_reset_options[selected_user_reset]}",
         )
 
         if st.button("Restablecer contraseña", key="reset_password_button"):
@@ -1791,7 +1792,7 @@ elif page == "⚙️ Ajustes":
     st.markdown("### Corrección de errores de registro")
 
     with st.expander("🚫 Eliminar solicitud de lista de espera"):
-        _, waitlist_rows = get_table(conn, "admin_waitlist", limit=300)
+        _, waitlist_rows = paginated_table(conn, "admin_waitlist", "admin_waitlist")
 
         if not waitlist_rows:
             st.info("No hay solicitudes en lista de espera.")
@@ -1811,7 +1812,7 @@ elif page == "⚙️ Ajustes":
 
             confirm_delete_waitlist = st.checkbox(
                 "Confirmo que quiero eliminar esta solicitud",
-                key="admin_confirm_delete_waitlist",
+                key=f"admin_confirm_delete_waitlist_{waitlist_options[selected_waitlist]}",
             )
 
             if st.button("Eliminar solicitud", key="admin_delete_waitlist_button"):
@@ -1830,7 +1831,7 @@ elif page == "⚙️ Ajustes":
                         st.error(msg)
 
     with st.expander("⛔ Desactivar tratamiento activo"):
-        _, active_rows = get_table(conn, "admin_active", limit=300)
+        _, active_rows = paginated_table(conn, "admin_active", "admin_active")
 
         if not active_rows:
             st.info("No hay tratamientos activos.")
@@ -1850,7 +1851,7 @@ elif page == "⚙️ Ajustes":
 
             confirm_delete_active = st.checkbox(
                 "Confirmo que quiero desactivar este tratamiento conservando sus sesiones",
-                key="admin_confirm_delete_active",
+                key=f"admin_confirm_delete_active_{active_options[selected_active]}",
             )
 
             if st.button("Desactivar tratamiento", key="admin_delete_active_button"):
@@ -1922,7 +1923,7 @@ elif page == "⚙️ Ajustes":
                         st.error("Ya existe ese nombre de usuario o DNI.")
 
     st.markdown("### Listado de usuarios")
-    usuarios = get_all_users(conn)
+    _, usuarios = paginated_table(conn, "users", "admin_users")
     data_users = []
     for u in usuarios:
         data_users.append(
@@ -1965,7 +1966,7 @@ elif page == "⚙️ Ajustes":
                 st.rerun()
 
         st.markdown("### Activar o desactivar especialidades")
-        especialidades_todas = get_especialidades(conn, only_active=False)
+        _, especialidades_todas = paginated_table(conn, "specialties", "manage_specialties")
         if especialidades_todas:
             for nombre, req_sub, active in especialidades_todas:
                 c1, c2, c3 = st.columns([2.5, 1.2, 1])
@@ -2015,7 +2016,7 @@ elif page == "⚙️ Ajustes":
 
         st.markdown("### Activar o desactivar áreas")
 
-        _, areas_configuradas = get_table(conn, "areas")
+        _, areas_configuradas = paginated_table(conn, "areas", "manage_areas")
 
         for especialidad, area, activa in areas_configuradas:
             col_nombre, col_estado = st.columns([3, 1])
@@ -2042,7 +2043,7 @@ elif page == "⚙️ Ajustes":
 
     with tab3:
         st.markdown("### Especialidades")
-        rows = get_especialidades(conn, only_active=False)
+        _, rows = paginated_table(conn, "specialties", "list_specialties")
         data = []
         for nombre, req_sub, active in rows:
             data.append(
@@ -2055,7 +2056,7 @@ elif page == "⚙️ Ajustes":
         st.dataframe(data, width="stretch", hide_index=True)
 
         st.markdown("### Áreas")
-        _, rows_areas = get_table(conn, "areas")
+        _, rows_areas = paginated_table(conn, "areas", "list_areas")
         data_areas = []
         for specialty_name, name, active in rows_areas:
             data_areas.append(
@@ -2081,7 +2082,8 @@ elif page == "⚙️ Ajustes":
             else:
                 add_profession_config(conn, nueva_profesion)
                 st.rerun()
-        for nombre_profesion, activa in get_professions(conn, only_active=False):
+        _, active_professions = paginated_table(conn, "professions", "manage_professions")
+        for nombre_profesion, activa in active_professions:
             nuevo_estado = st.toggle(
                 nombre_profesion,
                 value=activa,

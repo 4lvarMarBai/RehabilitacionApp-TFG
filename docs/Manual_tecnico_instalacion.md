@@ -144,7 +144,11 @@ En modo clínico, el profesional registra la aceptación o el rechazo en **Segui
 
 La API envía la solicitud a `/api/chat` en la dirección local del servidor, sin proxies del entorno ni redirecciones. La entrada serializada tiene un máximo de 24.000 caracteres. La minimización oculta algunos identificadores, como NHC, DNI y correo electrónico. Las notas pueden conservar otros datos que identifiquen al paciente y deben tratarse como datos de salud. La API rechaza respuestas inválidas o incompletas. El centro debe verificar con informes representativos que el contexto de Ollama admite el volumen de texto previsto.
 
-El borrador clínico resume la evolución y los hallazgos documentados, distingue lo referido por el paciente de lo registrado por el profesional e identifica discrepancias y datos ausentes. Las instrucciones al modelo excluyen diagnósticos, pronósticos, recomendaciones terapéuticas y propuestas de alta o priorización. El profesional contrasta las afirmaciones con las fuentes, corrige las discrepancias y decide qué incorporar mediante el procedimiento de documentación clínica del centro.
+En modo clínico, la aplicación numera los fragmentos de cada informe y pide a Ollama que los clasifique mediante una respuesta JSON estructurada. El servidor valida que estén todas las fuentes y que cada fragmento tenga una categoría admitida. Luego construye el resumen con los fragmentos conservados, sus fechas y sus referencias originales. Una respuesta inválida se rechaza. [Salidas estructuradas de Ollama](https://docs.ollama.com/capabilities/structured-outputs)
+
+El profesional contrasta el resultado con las notas originales y comprueba si falta algún dato relevante antes de incorporar información a la documentación clínica del centro.
+
+**Verificación de fidelidad documental.** Con el modelo local `qwen2.5:7b-instruct` y las instrucciones `clinical-summary-v12`, se contrastaron 50 resúmenes de 228 informes ficticios breves. Los 50 coincidieron con sus fuentes y fechas, sin datos añadidos ni omisiones detectadas. En los 34 casos comparados con las versiones anteriores, hubo incidencias en 33 con las instrucciones originales, en 11 con el primer refuerzo y en 0 con la versión final. El 100 % observado describe la fidelidad en ese conjunto de prueba. Queda pendiente evaluar la selección con informes reales y determinar su utilidad asistencial.
 
 El texto se muestra en la sesión de Streamlit como borrador pendiente de revisión. La descarga JSON está disponible en la demostración. La auditoría registra la generación, el profesional, el modelo, la versión de las instrucciones y las huellas de entrada y salida. En modo clínico registra también la versión del protocolo. La incorporación del contenido revisado a la historia corresponde al profesional.
 
@@ -171,7 +175,7 @@ El esquema general se prepara con `api.init_db`, no en cada interacción. El arr
 
 ### 5.1. Paginación de pacientes e historiales
 
-La lista de espera, los tratamientos activos, el histórico de altas y la auditoría utilizan paginación en el servidor. También se paginan los selectores de tratamientos de Registro de sesiones y Seguimiento clínico, los dos historiales de sesiones y el listado de eventos del Dashboard. Solo se descarga la página solicitada.
+La lista de espera, los tratamientos activos, el histórico de altas y la auditoría utilizan paginación en el servidor. También se paginan los historiales de sesiones, los selectores de tratamientos para sesiones, seguimiento, alta y dashboard individual, y el listado de eventos del dashboard. En administración se paginan el registro de visitas, los usuarios, los catálogos y los selectores para corregir solicitudes o desactivar tratamientos. Solo se descarga la página solicitada.
 
 Las rutas `/tables/{name}` y `/treatments/{id}/sessions` admiten `page`, a partir de 1, y `page_size`, entre 1 y 100. Al solicitar una página, la respuesta incorpora `columns`, `rows`, `page`, `page_size`, `total` y `total_pages`. Las consultas anteriores sin `page` mantienen su respuesta compatible; no debe suponerse que esos accesos antiguos devuelven una base completa.
 
@@ -521,7 +525,7 @@ Para los puestos de usuario de esta arquitectura basta con el enlace y el certif
 
 - El modo clínico genera borradores descriptivos. Cada centro debe validar su calidad y completar la revisión normativa y operativa del apartado 9.1 antes de utilizarlo con datos reales.
 - No hay instalación como servicio de Windows ni arranque automático tras reiniciar el equipo. El acceso de parada solo controla los procesos registrados por el lanzador de esta instalación.
-- La paginación cubre los listados de pacientes e historiales descritos en el apartado 5.1. Otros listados y selectores, como visitas, catálogos y eliminaciones administrativas, conservan sus límites anteriores. Las páginas tampoco congelan los datos frente a cambios concurrentes.
+- La paginación cubre los listados clínicos y administrativos descritos en el apartado 5.1. Las altas y modificaciones concurrentes pueden desplazar un registro de una página a otra durante la consulta.
 - La frecuencia semanal se establece al asignar, no se filtra como frecuencia solicitada de la lista de espera.
 - La corrección de sesiones no tiene una interfaz general de edición y eliminación individual.
 - La coordinación entre tratamientos depende de los nombres concretos que reconoce `FISIO_ESPECIALIDADES`; ampliar un catálogo no amplía automáticamente esas reglas.

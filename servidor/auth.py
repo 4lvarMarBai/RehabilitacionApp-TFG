@@ -277,14 +277,16 @@ def reset_user_password_to_default(conn, user_id: int):
     )
 
 
+USER_LIST_QUERY = """
+    SELECT id, username, full_name, dni, profession, role, must_change_password, active, created_at
+    FROM users
+"""
+
+
 def get_all_users(conn):
     _, rows = fetch_all(
         conn,
-        """
-        SELECT id, username, full_name, dni, profession, role, must_change_password, active, created_at
-        FROM users
-        ORDER BY username ASC
-    """,
+        USER_LIST_QUERY + " ORDER BY username ASC, id ASC",
     )
     return rows
 

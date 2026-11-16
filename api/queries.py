@@ -7,7 +7,7 @@ from servidor.database import fetch_all
 from api.pagination import paginate_query
 
 
-ADMIN_TABLES = {"admin_waitlist", "admin_active", "user_dni", "areas"}
+ADMIN_TABLES = {"admin_waitlist", "admin_active", "user_dni", "areas", "specialties", "professions"}
 
 
 def read_table(
@@ -134,6 +134,20 @@ def read_table(
         return read_rows(
             conn,
             "SELECT specialty_name, name, active FROM subspecialties_config ORDER BY specialty_name, name LIMIT %s",
+            (limit,),
+        )
+
+    if name == "specialties":
+        return read_rows(
+            conn,
+            "SELECT name, requires_subspecialty, active FROM specialties_config ORDER BY name ASC LIMIT %s",
+            (limit,),
+        )
+
+    if name == "professions":
+        return read_rows(
+            conn,
+            "SELECT name, active FROM professions_config ORDER BY name ASC LIMIT %s",
             (limit,),
         )
 
