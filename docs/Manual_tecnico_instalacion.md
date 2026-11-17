@@ -1,7 +1,7 @@
 # Manual técnico y de instalación
 
 **Proyecto:** RehabilitacionApp-TFG  
-**Versión del manual:** 1.2, 11 de noviembre de 2026  
+**Versión del manual:** 1.3, 16 de noviembre de 2026\
 **Plataforma de instalación descrita:** Windows, PowerShell y servidor en red local.
 
 ## 1. Alcance
@@ -124,6 +124,12 @@ Al guardar una sesión, la API bloquea el tratamiento y comprueba que siga activ
 
 Los indicadores de seguimiento contabilizan las faltas para la asistencia, pero solo toman EVA, estado funcional y objetivos de sesiones REALIZADA o REVISION. Para calcular una tendencia del dolor se necesitan al menos dos medidas; una sola no se interpreta como estancamiento.
 
+Para el seguimiento tras una prótesis de rodilla, **Registrar sesiones** permite anotar la flexión, los grados que faltan para la extensión completa, el tiempo del Timed Up and Go (TUG), sus condiciones de medición y la suma de los siete ítems del KOOS, JR. Registra siempre la misma rodilla por tratamiento. Las medidas son opcionales y un campo vacío representa una medida ausente. Un déficit de extensión de 0° indica extensión completa. El servidor convierte la suma del KOOS, JR (0–28) a su puntuación de 0–100 usando la tabla oficial. [Instrucciones de puntuación del KOOS, JR](https://www.hss.edu/globalassets/files/research/hss-koos-jr-scoring-instructions.pdf)
+
+El profesional puede fijar una flexión mínima o un déficit de extensión máximo. **Seguimiento clínico** y **Dashboard clínico** muestran la evolución y el último valor registrado para la meta vigente. Los tiempos del TUG se comparan entre registros con las mismas condiciones anotadas. El cumplimiento del umbral describe la medición; la valoración terapéutica sigue a cargo del profesional.
+
+Los campos de rodilla se validan en la API y se guardan con la sesión. El historial conserva las metas fijadas y el seguimiento aplica la última en orden cronológico. Si se fija una meta nueva sin registrar la medida correspondiente, el informe la muestra pendiente de medición hasta disponer de un dato posterior. Una sesión previa a la migración mantiene vacíos los campos nuevos. El formulario deja vacía la EVA para diferenciar una medición ausente de un dolor con valor 0.
+
 El listado de auditoría muestra registros existentes de `assignment_log`. Sus recuentos de realizadas y revisiones al alta se calculan con las sesiones que constan creadas antes de la fecha del evento; no son una instantánea inmutable firmada.
 
 El filtro de eventos del Dashboard incluye la desactivación administrativa. Los eventos antiguos de eliminación de tratamiento siguen disponibles como históricos. La corrección del código no reescribe los registros previos: si existen eventos `ELIMINACION_SESION` emitidos por la versión anterior sin un borrado real, deben contrastarse con las sesiones conservadas.
@@ -145,6 +151,14 @@ En modo clínico, el profesional registra la aceptación o el rechazo en **Segui
 La API envía la solicitud a `/api/chat` en la dirección local del servidor, sin proxies del entorno ni redirecciones. La entrada serializada tiene un máximo de 24.000 caracteres. La minimización oculta algunos identificadores, como NHC, DNI y correo electrónico. Las notas pueden conservar otros datos que identifiquen al paciente y deben tratarse como datos de salud. La API rechaza respuestas inválidas o incompletas. El centro debe verificar con informes representativos que el contexto de Ollama admite el volumen de texto previsto.
 
 En modo clínico, la aplicación numera los fragmentos de cada informe y pide a Ollama que los clasifique mediante una respuesta JSON estructurada. El servidor valida que estén todas las fuentes y que cada fragmento tenga una categoría admitida. Luego construye el resumen con los fragmentos conservados, sus fechas y sus referencias originales. Una respuesta inválida se rechaza. [Salidas estructuradas de Ollama](https://docs.ollama.com/capabilities/structured-outputs)
+
+Cuando hay medidas de rodilla u objetivo individual, el servidor incorpora al informe una sección con los valores registrados, su cambio cuando existe una comparación válida y los objetivos pendientes o cuyo umbral se ha alcanzado. Los cálculos y la puntuación se obtienen de los registros y quedan identificados aparte del texto resumido por Ollama.
+
+El informe automático de seguimiento y el apartado numérico del informe con IA comparten el cálculo de `servidor/seguimiento_rodilla.py`. La conversión del KOOS, JR está en `comun/medidas_rodilla.py`. La huella de salida entregada por la API y la auditada cubren el texto combinado.
+
+Para verificar la integración se usaron Ollama y un esquema temporal de PostgreSQL. Se generaron tres informes ficticios para comprobar una meta alcanzada, una meta nueva pendiente con un TUG en condiciones diferentes y un historial anterior a la migración. La comprobación también incluyó el bloqueo sin consentimiento, la huella del texto y los eventos de auditoría.
+
+En la interfaz, los campos de informe son de solo lectura y se actualizan al cambiar de tratamiento o al regenerar el texto.
 
 El profesional contrasta el resultado con las notas originales y comprueba si falta algún dato relevante antes de incorporar información a la documentación clínica del centro.
 
@@ -172,6 +186,8 @@ Los índices de inicialización apoyan filtros de pendientes, estados, NHC y bú
 La interfaz reutiliza conexiones HTTP por sesión. Las lecturas idénticas se comparten solo durante una ejecución de Streamlit y se invalidan al escribir. `/bootstrap` agrupa la identidad, catálogos y, cuando corresponde, contadores. Resumen e informe de seguimiento comparten `/followup`. Las bibliotecas gráficas se cargan en sus pantallas y solo se consulta la vista seleccionada del Dashboard.
 
 El esquema general se prepara con `api.init_db`, no en cada interacción. El arranque de la API sí prepara los catálogos de profesión y la tabla de visitas. Estas funciones necesitan permisos adecuados en PostgreSQL.
+
+Al actualizar una instalación anterior a las medidas de rodilla, vuelve a ejecutar `python -m api.init_db` desde la raíz del proyecto con el entorno virtual del servidor y después reinicia los servicios. La actualización añade columnas opcionales a `treatment_sessions`; las sesiones previas conservan sus datos.
 
 ### 5.1. Paginación de pacientes e historiales
 

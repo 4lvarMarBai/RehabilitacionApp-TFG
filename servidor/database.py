@@ -236,6 +236,16 @@ def init_db(conn):
         cur.execute(
             "ALTER TABLE treatment_sessions ADD COLUMN IF NOT EXISTS incidents TEXT;"
         )
+        cur.execute("""
+            ALTER TABLE treatment_sessions
+            ADD COLUMN IF NOT EXISTS knee_flexion_deg DOUBLE PRECISION CHECK (knee_flexion_deg BETWEEN 0 AND 180),
+            ADD COLUMN IF NOT EXISTS knee_extension_deficit_deg DOUBLE PRECISION CHECK (knee_extension_deficit_deg BETWEEN 0 AND 180),
+            ADD COLUMN IF NOT EXISTS tug_seconds DOUBLE PRECISION CHECK (tug_seconds > 0 AND tug_seconds < 'Infinity'::DOUBLE PRECISION),
+            ADD COLUMN IF NOT EXISTS tug_conditions VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS koos_jr_raw SMALLINT CHECK (koos_jr_raw BETWEEN 0 AND 28),
+            ADD COLUMN IF NOT EXISTS knee_goal_metric TEXT CHECK (knee_goal_metric IN ('knee_flexion_deg', 'knee_extension_deficit_deg')),
+            ADD COLUMN IF NOT EXISTS knee_goal_target DOUBLE PRECISION CHECK (knee_goal_target BETWEEN 0 AND 180);
+        """)
 
         cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS slot_type TEXT;")
         cur.execute(

@@ -4,6 +4,121 @@ import calendar
 from collections import defaultdict
 import streamlit as st
 from cliente.api_client import get_table
+from comun.medidas_rodilla import (
+    INSTRUCCIONES_KOOS_JR, MEDIDAS, MEDIDAS_OBJETIVO, puntuacion_koos_jr,
+)
+
+
+def mostrar_informe_texto(etiqueta, texto, *, altura):
+    """Vincula el contenido visible al informe actual, incluso al cambiar de tratamiento."""
+    st.text_area(etiqueta, value=texto, height=altura, disabled=True)
+
+
+def campos_seguimiento_rodilla(rehab_id):
+    """Recoge las medidas que el profesional haya tomado en esta sesión."""
+    if st.session_state.pop(f"knee_clear_{rehab_id}", False):
+        for campo in ("on", "flexion", "extension", "tug", "tug_conditions", "koos", "goal_metric"):
+            st.session_state.pop(f"knee_{campo}_{rehab_id}", None)
+        for medida in MEDIDAS_OBJETIVO:
+            st.session_state.pop(f"knee_goal_target_{rehab_id}_{medida}", None)
+
+    with st.expander("Medidas y objetivo de rodilla"):
+        st.caption("Usa este bloque para seguir la misma rodilla a lo largo del tratamiento.")
+        if not st.checkbox("Registrar medidas u objetivo de rodilla", key=f"knee_on_{rehab_id}"):
+            return {}
+
+        c1, c2 = st.columns(2)
+        flexion = c1.number_input(
+            "Flexión (°)", 0.0, 180.0, value=None, step=1.0, key=f"knee_flexion_{rehab_id}",
+        )
+        deficit = c2.number_input(
+            "Déficit de extensión (°)", 0.0, 180.0, value=None, step=1.0,
+            help="Registra 0 si llega a la extensión completa y un valor positivo si faltan grados.",
+            key=f"knee_extension_{rehab_id}",
+        )
+        tug = c1.number_input(
+            "Timed Up and Go (s)", min_value=0.01, value=None, step=0.1,
+            key=f"knee_tug_{rehab_id}",
+        )
+        condiciones = None
+        if tug is not None:
+            condiciones = c2.text_input(
+                "Condiciones del TUG", max_chars=100,
+                placeholder="Ej. Sin ayuda, o bastón",
+                help="Usa la misma descripción para pruebas comparables.",
+                key=f"knee_tug_conditions_{rehab_id}",
+            ).strip() or None
+
+        koos = st.number_input(
+            "KOOS, JR · suma de los siete ítems (0–28)", 0, 28, value=None, step=1,
+            help="Introduce la suma del cuestionario completo solo en las sesiones en que se haya aplicado.",
+            key=f"knee_koos_{rehab_id}",
+        )
+        st.caption(f"[Instrucciones de puntuación del KOOS, JR]({INSTRUCCIONES_KOOS_JR})")
+        if koos is not None:
+            st.caption(f"Puntuación convertida: {puntuacion_koos_jr(koos):.3f} / 100")
+
+        meta_medida = st.selectbox(
+            "Fijar o actualizar el objetivo de movilidad",
+            MEDIDAS_OBJETIVO, index=None, placeholder="Mantener el objetivo actual",
+            format_func=lambda clave: MEDIDAS[clave][0], key=f"knee_goal_metric_{rehab_id}",
+        )
+        meta = None
+        if meta_medida is not None:
+            etiqueta = "Flexión mínima (°)" if meta_medida == "knee_flexion_deg" else "Déficit máximo (°)"
+            meta = st.number_input(
+                etiqueta, 0.0, 180.0, value=None, step=1.0,
+                key=f"knee_goal_target_{rehab_id}_{meta_medida}",
+            )
+        return {
+            "knee_flexion_deg": flexion,
+            "knee_extension_deficit_deg": deficit,
+            "tug_seconds": tug,
+            "tug_conditions": condiciones,
+            "koos_jr_raw": koos,
+            "knee_goal_metric": meta_medida,
+            "knee_goal_target": meta,
+        }
+
+
+def mostrar_evolucion_rodilla(seguimiento):
+    if not seguimiento or not (
+        any(seguimiento["series"].values()) or seguimiento["objetivo"]
+    ):
+        return
+    st.markdown("#### Evolución de rodilla")
+    if seguimiento["objetivo"]:
+        st.write(seguimiento["objetivo_descripcion"])
+
+    series = [(medida, puntos) for medida, puntos in seguimiento["series"].items() if puntos]
+    if not series:
+        return
+    import altair as alt
+
+    for (medida, puntos), columna in zip(series, st.columns(2) * 2):
+        nombre, unidad = MEDIDAS[medida]
+        with columna:
+            st.markdown(f"**{nombre} ({unidad})**")
+            datos_grafica = [
+                {
+                    "Fecha": punto["fecha"],
+                    "Valor": punto["valor"],
+                    **({"Condiciones": punto["condiciones"].casefold()} if medida == "tug_seconds" else {}),
+                }
+                for punto in puntos
+            ]
+            es_tug = medida == "tug_seconds"
+            detalle = ["Fecha:T", "Valor:Q"]
+            if es_tug:
+                detalle.append("Condiciones:N")
+            grafica = alt.Chart(alt.InlineData(values=datos_grafica)).mark_line(point=True).encode(
+                x=alt.X("Fecha:T", title="Fecha de sesión"),
+                y=alt.Y("Valor:Q", title=unidad),
+                tooltip=detalle,
+            )
+            if es_tug:
+                grafica = grafica.encode(color="Condiciones:N")
+            st.altair_chart(grafica.properties(height=225), width="stretch")
 
 
 def priority_badge(p: str) -> str:

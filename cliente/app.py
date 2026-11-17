@@ -72,7 +72,11 @@ from cliente.ui_helpers import (
     parse_attendance_days,
     render_mini_calendar,
     audit_event_label,
+    campos_seguimiento_rodilla,
+    mostrar_evolucion_rodilla,
+    mostrar_informe_texto,
 )
+from comun.medidas_rodilla import MEDIDAS, puntuacion_koos_jr
 from cliente.api_client import (
     authenticate_user,
     create_user,
@@ -925,6 +929,10 @@ elif page == "⚕️ Tratamientos activos":
 
         st.markdown("### Registro clínico de la sesión")
 
+        if st.session_state.pop("session_saved", False):
+            st.session_state.pop("session_pain_eva", None)
+            st.success("Registro guardado.")
+
         clinical_note = st.text_area(
             "Nota clínica",
             placeholder="Describe evolución, hallazgos, respuesta al tratamiento, tolerancia, etc.",
@@ -938,7 +946,7 @@ elif page == "⚕️ Tratamientos activos":
                 "Dolor EVA (0-10)",
                 min_value=0,
                 max_value=10,
-                value=0,
+                value=None,
                 step=1,
                 key="session_pain_eva",
             )
@@ -962,6 +970,11 @@ elif page == "⚕️ Tratamientos activos":
             key="session_incidents",
         )
 
+        medidas_rodilla = (
+            campos_seguimiento_rodilla(selected_patient["rehab_active_id"])
+            if session_status in {"REALIZADA", "REVISION"} else {}
+        )
+
         if st.button("Guardar sesión o falta", width="stretch", key="btn_save_session"):
             if (
                 session_status in ["FALTA_JUSTIFICADA", "FALTA_NO_JUSTIFICADA"]
@@ -974,6 +987,10 @@ elif page == "⚕️ Tratamientos activos":
                 )
             elif error_hora:
                 st.error(error_hora)
+            elif medidas_rodilla.get("tug_seconds") is not None and not medidas_rodilla.get("tug_conditions"):
+                st.error("Indica en qué condiciones se hizo el TUG.")
+            elif medidas_rodilla.get("knee_goal_metric") and medidas_rodilla.get("knee_goal_target") is None:
+                st.error("Introduce el valor del objetivo de movilidad.")
             else:
                 add_treatment_session(
                     conn=conn,
@@ -996,7 +1013,11 @@ elif page == "⚕️ Tratamientos activos":
                     functional_status=functional_status,
                     goal_status=goal_status,
                     incidents=incidents,
+                    **medidas_rodilla,
                 )
+                st.session_state["session_saved"] = True
+                st.session_state[f"knee_clear_{selected_patient['rehab_active_id']}"] = True
+                st.rerun()
 
         st.markdown("### Calendario mensual")
         hoy = date.today()
@@ -1139,6 +1160,7 @@ elif page == "📈 Seguimiento clínico":
         st.write(
             f"**Estado del objetivo:** {summary['last_goal_status'] or 'Sin registro'}"
         )
+        mostrar_evolucion_rodilla(summary.get("knee_followup"))
 
         st.markdown("### Informe automático")
 
@@ -1147,12 +1169,7 @@ elif page == "📈 Seguimiento clínico":
             selected_patient["rehab_active_id"],
         )
 
-        st.text_area(
-            "Informe generado",
-            value=report,
-            height=320,
-            key="clinical_followup_report",
-        )
+        mostrar_informe_texto("Informe generado", report, altura=320)
 
         patient_id = selected_patient["patient_id"]
         rehab_id = selected_patient["rehab_active_id"]
@@ -1171,7 +1188,6 @@ elif page == "📈 Seguimiento clínico":
                 "ai_summary",
                 "ai_model",
                 "ai_metadata",
-                "ai_summary_display",
             ):
                 st.session_state.pop(f"{campo_ia}_{rehab_id}", None)
 
@@ -1218,7 +1234,6 @@ elif page == "📈 Seguimiento clínico":
                     )
                     st.session_state.pop(f"ai_summary_{rehab_id}", None)
                     st.session_state.pop(f"ai_metadata_{rehab_id}", None)
-                    st.session_state.pop(f"ai_summary_display_{rehab_id}", None)
                     st.success("Decisión guardada.")
                     st.rerun()
 
@@ -1259,12 +1274,10 @@ elif page == "📈 Seguimiento clínico":
                     f"Modelo: {st.session_state.get(f'ai_model_{rehab_id}', 'Ollama')}. "
                     "Contrasta el resultado con los informes originales."
                 )
-                st.text_area(
+                mostrar_informe_texto(
                     "Borrador generado por IA",
-                    value=st.session_state[f"ai_summary_{rehab_id}"],
-                    height=400,
-                    disabled=clinical_ai,
-                    key=f"ai_summary_display_{rehab_id}",
+                    st.session_state[f"ai_summary_{rehab_id}"],
+                    altura=400,
                 )
                 if not clinical_ai:
                     st.download_button(
@@ -1318,6 +1331,19 @@ elif page == "📈 Seguimiento clínico":
             d["funcional"] = d.pop("functional_status")
             d["objetivo"] = d.pop("goal_status")
             d["incidencias"] = d.pop("incidents")
+            medidas = {
+                "Flexión (°)": d.pop("knee_flexion_deg", None),
+                "Déficit de extensión (°)": d.pop("knee_extension_deficit_deg", None),
+                "TUG (s)": d.pop("tug_seconds", None),
+                "Condiciones del TUG": d.pop("tug_conditions", None),
+                "KOOS, JR (0–100)": puntuacion_koos_jr(d.pop("koos_jr_raw", None)),
+            }
+            d.update({nombre: valor for nombre, valor in medidas.items() if valor is not None})
+            meta_medida = d.pop("knee_goal_metric", None)
+            meta_valor = d.pop("knee_goal_target", None)
+            if meta_medida:
+                nombre, unidad = MEDIDAS[meta_medida]
+                d["Meta fijada"] = f"{nombre}: {meta_valor:g} {unidad}"
             d.pop("subspecialty", None)
             sess_data.append(d)
 
@@ -1411,6 +1437,7 @@ elif page == "📉 Dashboard clínico":
                 plt.close(fig)
             else:
                 st.info("No hay datos EVA suficientes para este tratamiento.")
+            mostrar_evolucion_rodilla(resumen.get("knee_followup"))
 
             # -------- Distribución de estados --------
             st.markdown("#### Distribución de sesiones")
@@ -1445,12 +1472,7 @@ elif page == "📉 Dashboard clínico":
             report = generate_clinical_followup_report(
                 conn, selected_patient["rehab_active_id"]
             )
-            st.text_area(
-                "Informe de seguimiento",
-                value=report,
-                height=260,
-                key="dashboard_followup_report",
-            )
+            mostrar_informe_texto("Informe de seguimiento", report, altura=260)
 
     elif dashboard_view == "Resumen global":
         st.markdown("### Resumen global del servicio")

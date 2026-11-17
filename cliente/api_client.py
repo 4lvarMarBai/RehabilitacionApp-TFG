@@ -379,6 +379,14 @@ def add_treatment_session(
     functional_status="",
     goal_status="",
     incidents="",
+    *,
+    knee_flexion_deg=None,
+    knee_extension_deficit_deg=None,
+    tug_seconds=None,
+    tug_conditions=None,
+    koos_jr_raw=None,
+    knee_goal_metric=None,
+    knee_goal_target=None,
 ):
     """Guarda la sesión y los datos de evolución asociados al tratamiento."""
     return _request(
@@ -395,6 +403,13 @@ def add_treatment_session(
             "functional_status": functional_status,
             "goal_status": goal_status,
             "incidents": incidents,
+            "knee_flexion_deg": knee_flexion_deg,
+            "knee_extension_deficit_deg": knee_extension_deficit_deg,
+            "tug_seconds": tug_seconds,
+            "tug_conditions": tug_conditions,
+            "koos_jr_raw": koos_jr_raw,
+            "knee_goal_metric": knee_goal_metric,
+            "knee_goal_target": knee_goal_target,
         },
     )
 

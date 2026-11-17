@@ -4,6 +4,7 @@
 from servidor.database import fetch_all, now_iso
 from comun.validators import validar_regla_coordinacion, validar_dias_asistencia
 from servidor.ai_clinical import resumir_informes
+from servidor.seguimiento_rodilla import formatear_seguimiento_rodilla, resumir_medidas_rodilla
 from servidor.ai_policy import (
     ai_use_mode,
     clinical_consent_version,
@@ -554,6 +555,14 @@ def add_treatment_session(
     functional_status: str = "",
     goal_status: str = "",
     incidents: str = "",
+    *,
+    knee_flexion_deg: float | None = None,
+    knee_extension_deficit_deg: float | None = None,
+    tug_seconds: float | None = None,
+    tug_conditions: str | None = None,
+    koos_jr_raw: int | None = None,
+    knee_goal_metric: str | None = None,
+    knee_goal_target: float | None = None,
 ):
     """Guarda la sesión y los datos de evolución asociados al tratamiento."""
     created_at = now_iso()
@@ -599,10 +608,18 @@ def add_treatment_session(
                         pain_eva,
                         functional_status,
                         goal_status,
-                        incidents
+                        incidents,
+                        knee_flexion_deg,
+                        knee_extension_deficit_deg,
+                        tug_seconds,
+                        tug_conditions,
+                        koos_jr_raw,
+                        knee_goal_metric,
+                        knee_goal_target
                     )
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """,
                 (
@@ -622,6 +639,13 @@ def add_treatment_session(
                     functional_status if functional_status else None,
                     goal_status if goal_status else None,
                     incidents if incidents else None,
+                    knee_flexion_deg,
+                    knee_extension_deficit_deg,
+                    tug_seconds,
+                    tug_conditions,
+                    koos_jr_raw,
+                    knee_goal_metric,
+                    knee_goal_target,
                 ),
             )
             session_id = cur.fetchone()[0]
@@ -659,7 +683,14 @@ def get_treatment_sessions(conn, rehab_active_id: int):
             pain_eva,
             functional_status,
             goal_status,
-            incidents
+            incidents,
+            knee_flexion_deg,
+            knee_extension_deficit_deg,
+            tug_seconds,
+            tug_conditions,
+            koos_jr_raw,
+            knee_goal_metric,
+            knee_goal_target
         FROM treatment_sessions
         WHERE rehab_active_id = %s
         ORDER BY session_date DESC, session_time DESC NULLS LAST, id DESC
@@ -680,10 +711,16 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
             pain_eva,
             functional_status,
             goal_status,
-            clinical_note
+            knee_flexion_deg,
+            knee_extension_deficit_deg,
+            tug_seconds,
+            tug_conditions,
+            koos_jr_raw,
+            knee_goal_metric,
+            knee_goal_target
         FROM treatment_sessions
         WHERE rehab_active_id = %s
-        ORDER BY session_date ASC, id ASC
+        ORDER BY session_date ASC, session_time ASC NULLS LAST, id ASC
     """,
         (rehab_active_id,),
     )
@@ -697,9 +734,10 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
     pain_values = []
     last_functional_status = None
     last_goal_status = None
+    knee_rows = []
 
     for row in rows:
-        _, status, pain_eva, functional_status, goal_status, _ = row
+        fecha, status, pain_eva, functional_status, goal_status, *medidas = row
         total_sessions += 1
 
         if status == "REALIZADA":
@@ -713,6 +751,7 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
 
         # Una falta cuenta para la asistencia, pero no es una valoración clínica.
         if status in {"REALIZADA", "REVISION"}:
+            knee_rows.append((fecha, *medidas))
             if pain_eva is not None:
                 pain_values.append(int(pain_eva))
             if functional_status:
@@ -760,6 +799,7 @@ def get_clinical_followup_summary(conn, rehab_active_id: int):
         "last_goal_status": last_goal_status,
         "abandonment_risk": abandonment_risk,
         "stagnation_risk": stagnation_risk,
+        "knee_followup": resumir_medidas_rodilla(knee_rows),
     }
 
 
@@ -820,6 +860,9 @@ def format_clinical_followup_report(summary):
     else:
         texto.append("No se detectan signos claros de estancamiento funcional.")
 
+    seguimiento_rodilla = formatear_seguimiento_rodilla(summary["knee_followup"])
+    if seguimiento_rodilla:
+        texto.extend(("", seguimiento_rodilla))
     return "\n".join(texto)
 
 
@@ -965,17 +1008,30 @@ def generate_ai_clinical_summary(
         for index, row in enumerate(rows)
     ]
 
+    seguimiento = get_clinical_followup_summary(conn, rehab_active_id)
+    rodilla = seguimiento.pop("knee_followup")
     indicadores = {}
     if not clinical:
-        indicadores = minimize_payload(
-            get_clinical_followup_summary(conn, rehab_active_id), patient_id
-        )
+        indicadores = minimize_payload(seguimiento, patient_id)
 
     resumen, modelo = resumir_informes(
         informes=informes,
         indicadores=indicadores,
         **({"clinical": True} if clinical else {}),
     )
+    bloque_rodilla = formatear_seguimiento_rodilla(rodilla)
+    if bloque_rodilla:
+        partes = ["Indicadores calculados a partir de los registros", bloque_rodilla]
+        if seguimiento["first_pain"] is not None:
+            partes.append(
+                f"Dolor EVA: inicial {seguimiento['first_pain']} / última {seguimiento['last_pain']}."
+            )
+        if seguimiento["last_goal_status"]:
+            partes.append(
+                "Última valoración del objetivo por el profesional: "
+                + seguimiento["last_goal_status"] + "."
+            )
+        resumen += "\n\n" + "\n".join(partes)
 
     if clinical and not has_clinical_assignment(conn, patient_id, actor, rehab_active_id):
         raise PermissionError("El tratamiento ya no está asignado al profesional solicitante.")
@@ -1002,7 +1058,7 @@ def generate_ai_clinical_summary(
                     patient_id,
                     specialty,
                     subspecialty,
-                    f"Modelo {modelo}; prompt={CLINICAL_PROMPT_VERSION if clinical else PROMPT_VERSION}; modo={mode}; protocolo={consent_options.get('version', 'software-v1')}; fuentes={len(informes)}; entrada_sha256={digest({'informes': informes, 'indicadores': indicadores})}; salida_sha256={digest(resumen)}",
+                    f"Modelo {modelo}; prompt={CLINICAL_PROMPT_VERSION if clinical else PROMPT_VERSION}; modo={mode}; protocolo={consent_options.get('version', 'software-v1')}; fuentes={len(informes)}; entrada_sha256={digest({'informes': informes, 'indicadores': indicadores, 'medidas_registradas': rodilla})}; salida_sha256={digest(resumen)}",
                     actor,
                     now_iso(),
                 ),

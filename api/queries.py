@@ -52,7 +52,9 @@ def read_table(
             SELECT id, rehab_active_id, patient_id, specialty, subspecialty,
                    session_date, session_time, status, absence_reason,
                    out_of_schedule_reason, recorded_by, created_at,
-                   clinical_note, pain_eva, functional_status, goal_status, incidents
+                   clinical_note, pain_eva, functional_status, goal_status, incidents,
+                   knee_flexion_deg, knee_extension_deficit_deg, tug_seconds,
+                   tug_conditions, koos_jr_raw, knee_goal_metric, knee_goal_target
             FROM treatment_sessions WHERE rehab_active_id = %s
             ORDER BY session_date DESC, session_time DESC NULLS LAST, id DESC LIMIT %s
         """, (rehab_active_id, limit))

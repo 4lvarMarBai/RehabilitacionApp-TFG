@@ -3,7 +3,7 @@
 from datetime import date, time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Body(BaseModel):
@@ -62,6 +62,29 @@ class TreatmentSession(Body):
     functional_status: str = Field(default="", max_length=4000)
     goal_status: Literal["", "NO_INICIADO", "PARCIAL", "CUMPLIDO", "EMPEORA"] = ""
     incidents: str = Field(default="", max_length=4000)
+    knee_flexion_deg: float | None = Field(default=None, ge=0, le=180)
+    knee_extension_deficit_deg: float | None = Field(default=None, ge=0, le=180)
+    tug_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tug_conditions: str | None = Field(default=None, max_length=100)
+    koos_jr_raw: int | None = Field(default=None, ge=0, le=28)
+    knee_goal_metric: Literal["knee_flexion_deg", "knee_extension_deficit_deg"] | None = None
+    knee_goal_target: float | None = Field(default=None, ge=0, le=180)
+
+    @model_validator(mode="after")
+    def validate_knee_measurements(self):
+        self.tug_conditions = (self.tug_conditions or "").strip() or None
+        if (self.tug_seconds is None) != (self.tug_conditions is None):
+            raise ValueError("Registra el tiempo del TUG y sus condiciones de medición.")
+        if (self.knee_goal_metric is None) != (self.knee_goal_target is None):
+            raise ValueError("Selecciona la medida del objetivo e introduce su valor.")
+        if self.status not in {"REALIZADA", "REVISION"} and any(
+            value is not None for value in (
+                self.knee_flexion_deg, self.knee_extension_deficit_deg,
+                self.tug_seconds, self.koos_jr_raw, self.knee_goal_metric,
+            )
+        ):
+            raise ValueError("Las medidas y metas solo se registran en sesiones realizadas o revisiones.")
+        return self
 
 
 class Discharge(Body):
