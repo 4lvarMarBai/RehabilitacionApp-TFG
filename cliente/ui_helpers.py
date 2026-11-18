@@ -15,27 +15,20 @@ def mostrar_informe_texto(etiqueta, texto, *, altura):
 
 
 def campos_seguimiento_rodilla(rehab_id):
-    """Recoge las medidas que el profesional haya tomado en esta sesión."""
+    """Recoge el TUG general y, por separado, las medidas específicas de rodilla."""
     if st.session_state.pop(f"knee_clear_{rehab_id}", False):
         for campo in ("on", "flexion", "extension", "tug", "tug_conditions", "koos", "goal_metric"):
             st.session_state.pop(f"knee_{campo}_{rehab_id}", None)
         for medida in MEDIDAS_OBJETIVO:
             st.session_state.pop(f"knee_goal_target_{rehab_id}_{medida}", None)
 
-    with st.expander("Medidas y objetivo de rodilla"):
-        st.caption("Usa este bloque para seguir la misma rodilla a lo largo del tratamiento.")
-        if not st.checkbox("Registrar medidas u objetivo de rodilla", key=f"knee_on_{rehab_id}"):
-            return {}
-
+    medidas = {}
+    with st.expander("Movilidad funcional · TUG (opcional)"):
+        st.caption(
+            "El profesional decide si esta prueba es relevante para el paciente. "
+            "Puede registrarse aunque el tratamiento no sea de rodilla."
+        )
         c1, c2 = st.columns(2)
-        flexion = c1.number_input(
-            "Flexión (°)", 0.0, 180.0, value=None, step=1.0, key=f"knee_flexion_{rehab_id}",
-        )
-        deficit = c2.number_input(
-            "Déficit de extensión (°)", 0.0, 180.0, value=None, step=1.0,
-            help="Registra 0 si llega a la extensión completa y un valor positivo si faltan grados.",
-            key=f"knee_extension_{rehab_id}",
-        )
         tug = c1.number_input(
             "Timed Up and Go (s)", min_value=0.01, value=None, step=0.1,
             key=f"knee_tug_{rehab_id}",
@@ -48,10 +41,25 @@ def campos_seguimiento_rodilla(rehab_id):
                 help="Usa la misma descripción para pruebas comparables.",
                 key=f"knee_tug_conditions_{rehab_id}",
             ).strip() or None
+        medidas.update(tug_seconds=tug, tug_conditions=condiciones)
 
+    with st.expander("Medidas y objetivo de rodilla"):
+        st.caption("Usa este bloque para seguir la misma rodilla a lo largo del tratamiento.")
+        if not st.checkbox("Registrar medidas u objetivo de rodilla", key=f"knee_on_{rehab_id}"):
+            return medidas
+
+        c1, c2 = st.columns(2)
+        flexion = c1.number_input(
+            "Flexión (°)", 0.0, 180.0, value=None, step=1.0, key=f"knee_flexion_{rehab_id}",
+        )
+        deficit = c2.number_input(
+            "Déficit de extensión (°)", 0.0, 180.0, value=None, step=1.0,
+            help="Registra 0 si llega a la extensión completa y un valor positivo si faltan grados.",
+            key=f"knee_extension_{rehab_id}",
+        )
         koos = st.number_input(
             "KOOS, JR · suma de los siete ítems (0–28)", 0, 28, value=None, step=1,
-            help="Introduce la suma del cuestionario completo solo en las sesiones en que se haya aplicado.",
+            help="Cuestionario específico de rodilla para artroplastia. Introduce la suma solo cuando se haya aplicado.",
             key=f"knee_koos_{rehab_id}",
         )
         st.caption(f"[Instrucciones de puntuación del KOOS, JR]({INSTRUCCIONES_KOOS_JR})")
@@ -71,10 +79,9 @@ def campos_seguimiento_rodilla(rehab_id):
                 key=f"knee_goal_target_{rehab_id}_{meta_medida}",
             )
         return {
+            **medidas,
             "knee_flexion_deg": flexion,
             "knee_extension_deficit_deg": deficit,
-            "tug_seconds": tug,
-            "tug_conditions": condiciones,
             "koos_jr_raw": koos,
             "knee_goal_metric": meta_medida,
             "knee_goal_target": meta,
@@ -86,11 +93,26 @@ def mostrar_evolucion_rodilla(seguimiento):
         any(seguimiento["series"].values()) or seguimiento["objetivo"]
     ):
         return
-    st.markdown("#### Evolución de rodilla")
-    if seguimiento["objetivo"]:
-        st.write(seguimiento["objetivo_descripcion"])
+    series_tug = [("tug_seconds", seguimiento["series"].get("tug_seconds", []))]
+    series_rodilla = [
+        (medida, puntos) for medida, puntos in seguimiento["series"].items()
+        if medida != "tug_seconds" and puntos
+    ]
+    grupos = (
+        ("Movilidad funcional · TUG", [(m, p) for m, p in series_tug if p], False),
+        ("Evolución de rodilla", series_rodilla, bool(seguimiento["objetivo"])),
+    )
+    for titulo, series, mostrar_objetivo in grupos:
+        if not series and not mostrar_objetivo:
+            continue
+        st.markdown(f"#### {titulo}")
+        if mostrar_objetivo:
+            st.write(seguimiento["objetivo_descripcion"])
+        _mostrar_graficas_medidas(series)
 
-    series = [(medida, puntos) for medida, puntos in seguimiento["series"].items() if puntos]
+
+def _mostrar_graficas_medidas(series):
+    """Dibuja cada medida y distingue las condiciones de las pruebas TUG."""
     if not series:
         return
     import altair as alt

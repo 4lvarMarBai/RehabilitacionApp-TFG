@@ -66,10 +66,20 @@ def formatear_seguimiento_rodilla(seguimiento):
     if not any(medidas.values()) and objetivo is None:
         return ""
 
-    lineas = ["Medidas registradas de rodilla"]
-    for medida, puntos in medidas.items():
+    lineas = []
+    medidas_ordenadas = ["tug_seconds", *(m for m in medidas if m != "tug_seconds")]
+    encabezado_rodilla = False
+    for medida in medidas_ordenadas:
+        puntos = medidas[medida]
         if not puntos:
             continue
+        if medida == "tug_seconds":
+            lineas.append("Movilidad funcional · TUG")
+        elif not encabezado_rodilla:
+            if lineas:
+                lineas.append("")
+            lineas.append("Medidas registradas de rodilla")
+            encabezado_rodilla = True
         nombre, unidad = MEDIDAS[medida]
         inicial, actual, cambio = comparar_medidas(medida, puntos)
         linea = f"- {nombre}: {actual['valor']:g} {unidad} el {actual['fecha']}"

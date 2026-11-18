@@ -1,4 +1,4 @@
-"""Medidas de seguimiento tras una artroplastia de rodilla."""
+"""Medidas de rodilla y prueba general de movilidad funcional TUG."""
 
 MEDIDAS = {
     "knee_flexion_deg": ("Flexión", "°"),
