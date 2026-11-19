@@ -2,6 +2,7 @@
 # services.py
 
 from servidor.database import fetch_all, now_iso
+from servidor.clinician_leave import require_available_clinician
 from comun.validators import validar_regla_coordinacion, validar_dias_asistencia
 from servidor.ai_clinical import resumir_informes
 from servidor.seguimiento_rodilla import formatear_seguimiento_rodilla, resumir_medidas_rodilla
@@ -135,6 +136,44 @@ def preview_next_patient(
 
 
 # -------------------- CREATE WAITLIST --------------------
+class DuplicateRequestError(ValueError):
+    """Pide confirmación antes de repetir una solicitud reciente o aún en curso."""
+
+    def __init__(self, duplicates):
+        super().__init__("Este NHC ya está registrado en la misma especialidad y área.")
+        self.duplicates = duplicates
+
+
+def _find_duplicate_requests(cur, patient_id, requests):
+    cur.execute("""
+        SELECT w.specialty, w.subspecialty, COUNT(*), MAX(w.created_at)
+        FROM waitlist w
+        JOIN unnest(%s::text[], %s::text[]) AS requested(specialty, subspecialty)
+          ON w.specialty = requested.specialty
+         AND w.subspecialty IS NOT DISTINCT FROM requested.subspecialty
+        WHERE w.patient_id = %s
+          AND (
+              w.created_at >= NOW() - INTERVAL '3 months'
+              OR w.status = 'EN_ESPERA'
+              OR EXISTS (
+                  SELECT 1 FROM rehab_active a
+                  WHERE a.source_waitlist_id = w.id AND a.status = 'ACTIVO'
+              )
+          )
+        GROUP BY w.specialty, w.subspecialty
+        ORDER BY w.specialty, w.subspecialty
+    """, (
+        [item["specialty"] for item in requests],
+        [item.get("subspecialty") for item in requests],
+        patient_id,
+    ))
+    return [
+        {"specialty": specialty, "subspecialty": area,
+         "count": count, "last_created_at": str(created_at)}
+        for specialty, area, count, created_at in cur.fetchall()
+    ]
+
+
 def add_waiting_patient_multiple(
     conn,
     patient_id,
@@ -149,6 +188,7 @@ def add_waiting_patient_multiple(
     preferred_hour,
     coordination_rule,
     ai_consent_accepted: bool | None = None,
+    confirm_duplicate: bool = False,
 ):
     """Guarda el consentimiento y una solicitud por tratamiento en una misma transacción."""
     if ai_use_mode() == "demo" and ai_consent_accepted is None:
@@ -160,6 +200,15 @@ def add_waiting_patient_multiple(
 
     with conn.transaction():
         with conn.cursor() as cur:
+            # Serializa la creación de solicitudes del mismo NHC, incluidos envíos simultáneos.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"rehabilitacion:solicitudes:{patient_id}",),
+            )
+            duplicates = _find_duplicate_requests(cur, patient_id, requests)
+            if duplicates and not confirm_duplicate:
+                raise DuplicateRequestError(duplicates)
+            duplicate_keys = {(item["specialty"], item["subspecialty"]) for item in duplicates}
             if ai_use_mode() == "demo":
                 set_patient_ai_consent(conn, patient_id, ai_consent_accepted, actor)
 
@@ -227,7 +276,7 @@ def add_waiting_patient_multiple(
                     VALUES (
                         'CREACION_SOLICITUD',
                         %s, NULL, %s, %s, %s, %s, NULL, NULL,
-                        'SOLICITUD_CREADA', NULL, %s, %s
+                        'SOLICITUD_CREADA', %s, %s, %s
                     )
                 """,
                     (
@@ -236,6 +285,8 @@ def add_waiting_patient_multiple(
                         req["specialty"],
                         req["subspecialty"],
                         priority_level,
+                        "Repetición confirmada por el usuario"
+                        if (req["specialty"], req["subspecialty"]) in duplicate_keys else None,
                         actor,
                         now,
                     ),
@@ -306,6 +357,7 @@ def assign_next_patient(
 
     with conn.transaction():
         with conn.cursor() as cur:
+            require_available_clinician(cur, assigned_clinician_dni)
             cur.execute(query, tuple(params))
             row = cur.fetchone()
 
@@ -942,15 +994,28 @@ def set_patient_ai_consent(
             )
 
 
+def require_medical_summary_access(conn, actor):
+    """Revalida el rol por si se revoca durante una generación larga."""
+    _, rows = fetch_all(conn, """
+        SELECT id FROM users
+        WHERE dni = %s AND role = 'MEDICO'
+          AND profession = 'Médico rehabilitador'
+          AND active = TRUE AND must_change_password = FALSE
+    """, (actor,))
+    if not rows:
+        raise PermissionError("Los resúmenes de IA están reservados al médico rehabilitador con una cuenta activa.")
+
+
 def generate_ai_clinical_summary(
     conn, rehab_active_id: int, actor: str, *, synthetic_data_confirmed=False,
     role=None,
 ):
     """Comprueba el acceso y el consentimiento antes de generar el borrador."""
+    if role != "MEDICO":
+        raise PermissionError("Los resúmenes de IA están reservados al médico rehabilitador.")
+    require_medical_summary_access(conn, actor)
     mode = require_summary_mode(synthetic_data_confirmed)
     clinical = mode == "clinical"
-    if clinical and role != "CLINICO":
-        raise PermissionError("La generación clínica requiere el perfil de profesional clínico.")
     _, treatment_rows = fetch_all(
         conn,
         """
@@ -967,8 +1032,6 @@ def generate_ai_clinical_summary(
     patient_id, specialty, subspecialty = treatment_rows[0]
 
     consent_options = {"version": clinical_consent_version()} if clinical else {}
-    if clinical and not has_clinical_assignment(conn, patient_id, actor, rehab_active_id):
-        raise PermissionError("Solo el profesional asignado puede generar este borrador.")
     if get_patient_ai_consent(conn, patient_id, **consent_options) is not True:
         raise PermissionError("No consta consentimiento aceptado para el modo de IA actual.")
 
@@ -1033,8 +1096,7 @@ def generate_ai_clinical_summary(
             )
         resumen += "\n\n" + "\n".join(partes)
 
-    if clinical and not has_clinical_assignment(conn, patient_id, actor, rehab_active_id):
-        raise PermissionError("El tratamiento ya no está asignado al profesional solicitante.")
+    require_medical_summary_access(conn, actor)
     if get_patient_ai_consent(conn, patient_id, **consent_options) is not True:
         raise PermissionError(
             "La aceptación se ha retirado durante la generación. No se mostrará el resultado."

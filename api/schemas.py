@@ -38,6 +38,7 @@ class WaitingRequest(Body):
     preferred_hour: str | None = Field(default=None, max_length=5)
     coordination_rule: Literal["NINGUNA", "MISMO_DIA", "DIAS_ALTERNOS"]
     ai_consent_accepted: bool | None = None
+    confirm_duplicate: bool = Field(default=False, strict=True)
 
 
 class Assignment(Body):
@@ -104,7 +105,7 @@ class UserCreate(Body):
     full_name: str = Field(min_length=1, max_length=200)
     dni: str = Field(min_length=9, max_length=9)
     profession: str = Field(min_length=1, max_length=100)
-    role: Literal["ADMIN", "CLINICO"]
+    role: Literal["ADMIN", "CLINICO", "MEDICO"]
 
 
 class SpecialtyCreate(Body):
@@ -132,6 +133,15 @@ class ProfessionCreate(Body):
 
 class ProfessionState(ProfessionCreate):
     active: bool
+
+
+class ClinicianLeave(Body):
+    on_leave: bool = Field(strict=True)
+
+
+class TreatmentReassignment(Body):
+    expected_clinician_dni: str = Field(pattern=r"^[0-9]{8}[A-Z]$")
+    target_user_id: int = Field(ge=1)
 
 
 class AISummaryRequest(Body):

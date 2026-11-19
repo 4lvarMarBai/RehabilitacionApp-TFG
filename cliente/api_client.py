@@ -17,6 +17,12 @@ class ApiError(RuntimeError):
     pass
 
 
+class DuplicateRequestError(ApiError):
+    def __init__(self, detail):
+        super().__init__(detail["message"])
+        self.duplicates = detail["duplicates"]
+
+
 OllamaError = ApiError  # Compatibilidad con el bloque de errores de la pantalla.
 
 
@@ -66,7 +72,9 @@ def begin_api_run():
 def _http_session():
     """Conexiones persistentes privadas para cada sesión de usuario."""
     if "_api_http_session" not in st.session_state:
-        st.session_state["_api_http_session"] = requests.Session()
+        session = requests.Session()
+        session.trust_env = False
+        st.session_state["_api_http_session"] = session
     return st.session_state["_api_http_session"]
 
 
@@ -110,6 +118,11 @@ def _request(method, path, *, data=None, params=None, login=False, timeout=60):
             "No se pudo contactar con la API. Comprueba que el servidor esté disponible. Si estabas guardando datos, revisa el historial antes de repetir la operación."
         )
         st.stop()
+    if response.status_code == 403:
+        cache.clear()
+        for key in list(st.session_state):
+            if key.startswith(("ai_summary_", "ai_model_", "ai_metadata_")):
+                st.session_state.pop(key, None)
     if login and response.status_code == 401:
         return None
     if response.status_code == 401:
@@ -128,6 +141,11 @@ def _request(method, path, *, data=None, params=None, login=False, timeout=60):
         st.stop()
     if not 200 <= response.status_code < 300:
         detail = result.get("detail", "No se pudo completar la operación.")
+        if (
+            response.status_code == 409 and isinstance(detail, dict)
+            and detail.get("code") == "DUPLICATE_REQUEST"
+        ):
+            raise DuplicateRequestError(detail)
         if isinstance(detail, list):
             detail = "; ".join(
                 f"{'.'.join(str(x) for x in item.get('loc', []))}: {item.get('msg', '')}"
@@ -304,6 +322,7 @@ def add_waiting_patient_multiple(
     preferred_hour,
     coordination_rule,
     ai_consent_accepted=None,
+    confirm_duplicate=False,
 ):
     """Guarda el consentimiento y una solicitud por tratamiento en una misma transacción."""
     return _request(
@@ -321,6 +340,7 @@ def add_waiting_patient_multiple(
             "preferred_hour": preferred_hour,
             "coordination_rule": coordination_rule,
             "ai_consent_accepted": ai_consent_accepted,
+            "confirm_duplicate": confirm_duplicate,
         },
     )
 
@@ -592,3 +612,13 @@ def get_clinical_visits(conn=None, patient_id=None, clinician_dni=None):
         params={"patient_id": patient_id, "clinician_dni": clinician_dni},
     )
     return result["columns"], result["rows"]
+
+
+def set_clinician_leave(conn, user_id, on_leave):
+    return _request("PUT", f"/admin/users/{user_id}/leave", data={"on_leave": on_leave})
+
+
+def reassign_treatment(conn, rehab_id, expected_dni, target_user_id):
+    return _request("POST", f"/admin/treatments/{rehab_id}/reassign", data={
+        "expected_clinician_dni": expected_dni, "target_user_id": target_user_id,
+    })

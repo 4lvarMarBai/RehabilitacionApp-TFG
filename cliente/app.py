@@ -7,6 +7,7 @@ from datetime import date, time
 import streamlit as st
 import json
 
+from comun.roles import can_use_ai_summary, role_for_profession, ROLE_LABELS
 from comun.config import (
     PRIORIDADES,
     MESES_ES,
@@ -51,6 +52,8 @@ from cliente.api_client import (
     get_stats,
     delete_waitlist_entry,
     delete_active_treatment,
+    set_clinician_leave,
+    reassign_treatment,
     get_clinical_followup_summary,
     generate_clinical_followup_report,
     get_patient_pain_series,
@@ -75,6 +78,7 @@ from cliente.ui_helpers import (
     campos_seguimiento_rodilla,
     mostrar_evolucion_rodilla,
     mostrar_informe_texto,
+    mostrar_aviso_solicitud_repetida,
 )
 from comun.medidas_rodilla import MEDIDAS, puntuacion_koos_jr
 from cliente.api_client import (
@@ -90,6 +94,7 @@ from cliente.api_client import (
 
 from cliente.api_client import (
     OllamaError,
+    DuplicateRequestError,
 )
 
 st.set_page_config(
@@ -217,6 +222,18 @@ actor_sidebar = usuario_actual["dni"]
 rol_usuario = usuario_actual["role"]
 nombre_usuario = usuario_actual["full_name"]
 profesion_usuario = usuario_actual["profession"]
+identidad_acceso = (usuario_actual["id"], rol_usuario)
+if st.session_state.get("_identidad_acceso", identidad_acceso) != identidad_acceso:
+    for clave in list(st.session_state):
+        if clave not in {"user", "access_token", "_api_http_session", "ai_use_mode"}:
+            st.session_state.pop(clave, None)
+st.session_state["_identidad_acceso"] = identidad_acceso
+puede_usar_resumen_ia = can_use_ai_summary(usuario_actual)
+if not puede_usar_resumen_ia:
+    # Un cambio de cuenta o de permisos no debe dejar resultados anteriores visibles.
+    for clave in list(st.session_state):
+        if clave.startswith(("ai_summary_", "ai_model_", "ai_metadata_")):
+            st.session_state.pop(clave, None)
 
 especialidades_activas = get_nombres_especialidades(conn, only_active=True)
 
@@ -234,6 +251,9 @@ opciones_paginas = [
 ]
 
 if rol_usuario == "ADMIN":
+    opciones_paginas = [p for p in opciones_paginas if p not in {
+        "⚕️ Tratamientos activos", "📈 Seguimiento clínico", "📉 Dashboard clínico"
+    }]
     opciones_paginas.append("⚙️ Ajustes")
     opciones_paginas.append("📖 Registro de visitas")
 
@@ -271,7 +291,9 @@ if specialty_filter != "Todas" and specialty_requires_subspecialty(
 st.sidebar.markdown(f"**Usuario:** {nombre_usuario}")
 st.sidebar.markdown(f"**DNI:** {actor_sidebar}")
 st.sidebar.markdown(f"**Profesión:** {profesion_usuario}")
-st.sidebar.markdown(f"**Rol:** {rol_usuario}")
+st.sidebar.markdown(f"**Rol:** {ROLE_LABELS.get(rol_usuario, rol_usuario)}")
+if usuario_actual.get("on_leave"):
+    st.sidebar.warning("Baja temporal: puedes consultar la aplicación, pero no recibir nuevas asignaciones.")
 
 assign_slot_filter = st.session_state.get("assign_slot_filter", "Todas")
 assign_shift_filter = st.session_state.get("assign_shift_filter", "Todas")
@@ -436,7 +458,7 @@ if page == "📊 Panel de control":
 
         attendance_days = OPCIONES_ASISTENCIA[attendance_pattern]
 
-        if st.button("Asignar siguiente", width="stretch", key="btn_assign_next"):
+        if st.button("Asignar siguiente", width="stretch", key="btn_assign_next", disabled=rol_usuario == "ADMIN" or usuario_actual.get("on_leave", False)):
             try:
                 res = assign_next_patient(
                     conn,
@@ -473,49 +495,52 @@ if page == "📊 Panel de control":
                 st.rerun()
 
         st.divider()
-        st.caption("Formalización del alta de un tratamiento activo.")
-        _, rowsA = paginated_table(conn, "active_basic", "discharge_treatments")
-        if not rowsA:
-            st.info("No hay pacientes activos.")
+        if rol_usuario == "ADMIN":
+            st.caption("El alta y el seguimiento clínico corresponden a los perfiles asistenciales.")
         else:
-            options = {
-                f"{r[0]} · {r[1]} · {specialty_label(r[2], r[3])} · inicio {str(r[4])[:10]}": r[
-                    0
-                ]
-                for r in rowsA
-            }
-            pick = st.selectbox(
-                "NHC activo", list(options.keys()), key="dash_active_pick"
-            )
-            reason = st.selectbox(
-                "Motivo del alta",
-                ["FIN_TRATAMIENTO", "NO_ASISTE", "DERIVADO", "OTRO"],
-                key="dash_discharge_reason",
-            )
-            comment = st.text_area(
-                "Comentario clínico",
-                placeholder="Escribe observaciones sobre el alta...",
-                key="dash_discharge_comment",
-            )
+            st.caption("Formalización del alta de un tratamiento activo.")
+            _, rowsA = paginated_table(conn, "active_basic", "discharge_treatments")
+            if not rowsA:
+                st.info("No hay pacientes activos.")
+            else:
+                options = {
+                    f"{r[0]} · {r[1]} · {specialty_label(r[2], r[3])} · inicio {str(r[4])[:10]}": r[
+                        0
+                    ]
+                    for r in rowsA
+                }
+                pick = st.selectbox(
+                    "NHC activo", list(options.keys()), key="dash_active_pick"
+                )
+                reason = st.selectbox(
+                    "Motivo del alta",
+                    ["FIN_TRATAMIENTO", "NO_ASISTE", "DERIVADO", "OTRO"],
+                    key="dash_discharge_reason",
+                )
+                comment = st.text_area(
+                    "Comentario clínico",
+                    placeholder="Escribe observaciones sobre el alta...",
+                    key="dash_discharge_comment",
+                )
 
-            if st.button("Dar alta", width="stretch", key="btn_discharge"):
-                if reason == "OTRO" and not comment.strip():
-                    st.error(
-                        "Debes añadir un comentario clínico cuando el motivo es OTRO."
-                    )
-                else:
-                    ok = discharge_patient(
-                        conn,
-                        options[pick],
-                        reason=reason,
-                        comment=comment.strip(),
-                        actor=actor_sidebar,
-                    )
-                    if ok:
-                        st.success("Alta registrada.")
-                        st.rerun()
+                if st.button("Dar alta", width="stretch", key="btn_discharge"):
+                    if reason == "OTRO" and not comment.strip():
+                        st.error(
+                            "Debes añadir un comentario clínico cuando el motivo es OTRO."
+                        )
                     else:
-                        st.error("No se pudo registrar el alta.")
+                        ok = discharge_patient(
+                            conn,
+                            options[pick],
+                            reason=reason,
+                            comment=comment.strip(),
+                            actor=actor_sidebar,
+                        )
+                        if ok:
+                            st.success("Alta registrada.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo registrar el alta.")
 
 elif page == "📝 Nueva solicitud":
     # Limpiar antes de crear los widgets, tras confirmar el guardado en la API.
@@ -668,6 +693,18 @@ elif page == "📝 Nueva solicitud":
         "Si la especialidad requiere área, se creará una por cada área seleccionada."
     )
 
+    firma_solicitud = json.dumps({
+        "patient_id": patient_id, "priority": priority_level,
+        "date": str(request_dt), "eligible": eligible,
+        "specialties": selected_specialties, "areas": areas_por_especialidad,
+        "sessions": sesiones_por_especialidad,
+        "area_sessions": [(sp, sub, valor) for (sp, sub), valor in sesiones_por_area.items()],
+        "slot": slot_type, "shift": time_preference,
+        "transport": transport_mode, "hour": preferred_hour,
+        "coordination": coordination_rule, "consent": ai_consent_accepted,
+    }, sort_keys=True, ensure_ascii=False)
+    confirmar_repeticion = mostrar_aviso_solicitud_repetida(firma_solicitud)
+
     if st.button("Guardar solicitud", width="stretch", key="req_submit"):
         if not patient_id:
             st.error("Introduce el NHC del paciente.")
@@ -731,21 +768,28 @@ elif page == "📝 Nueva solicitud":
                         }
                     )
 
-            add_waiting_patient_multiple(
-                conn,
-                patient_id=patient_id,
-                priority_level=priority_level,
-                requests=requests,
-                request_date_iso=iso_utc_from_date(request_dt),
-                eligible=eligible,
-                actor=actor_sidebar,
-                slot_type=slot_type,
-                time_preference=time_preference,
-                transport_mode=transport_mode,
-                preferred_hour=preferred_hour,
-                coordination_rule=coordination_rule,
-                ai_consent_accepted=ai_consent_accepted,
-            )
+            try:
+                add_waiting_patient_multiple(
+                    conn,
+                    patient_id=patient_id,
+                    priority_level=priority_level,
+                    requests=requests,
+                    request_date_iso=iso_utc_from_date(request_dt),
+                    eligible=eligible,
+                    actor=actor_sidebar,
+                    slot_type=slot_type,
+                    time_preference=time_preference,
+                    transport_mode=transport_mode,
+                    preferred_hour=preferred_hour,
+                    coordination_rule=coordination_rule,
+                    ai_consent_accepted=ai_consent_accepted,
+                    confirm_duplicate=confirmar_repeticion,
+                )
+            except DuplicateRequestError as exc:
+                st.session_state["req_duplicate_pending"] = {
+                    "signature": firma_solicitud, "duplicates": exc.duplicates,
+                }
+                st.rerun()
 
             st.session_state["_new_request_saved_notice"] = (
                 f"Solicitud guardada para NHC {patient_id}. Se han creado {len(requests)} entradas."
@@ -1179,7 +1223,9 @@ elif page == "📈 Seguimiento clínico":
         # Vincula el borrador al modo de la instalación y a la decisión vigente.
         metadata_ia = st.session_state.get(f"ai_metadata_{rehab_id}", {})
         if (
-            metadata_ia.get("use_mode") != ai_mode
+            not puede_usar_resumen_ia
+            or not ai_status.get("can_generate")
+            or metadata_ia.get("use_mode") != ai_mode
             or consentimiento is not True
             or metadata_ia.get("consent_version") != ai_status.get("consent_version")
             or metadata_ia.get("ai_generated") is not True
@@ -1237,7 +1283,7 @@ elif page == "📈 Seguimiento clínico":
                     st.success("Decisión guardada.")
                     st.rerun()
 
-        if consentimiento is True:
+        if puede_usar_resumen_ia and ai_status.get("can_generate") and consentimiento is True:
             synthetic_confirmed = False
             if clinical_ai:
                 st.warning(
@@ -1296,10 +1342,10 @@ elif page == "📈 Seguimiento clínico":
                         mime="application/json",
                         key=f"ai_download_{rehab_id}",
                     )
+        elif not puede_usar_resumen_ia:
+            st.info("Los resúmenes de IA están reservados al médico rehabilitador.")
         elif ai_status.get("can_manage"):
             st.info("La generación requiere el consentimiento documentado para este modo.")
-        elif clinical_ai:
-            st.info("La generación clínica está reservada al profesional asignado al tratamiento.")
         else:
             st.info("La generación con IA está deshabilitada.")
 
@@ -1357,7 +1403,8 @@ elif page == "📉 Dashboard clínico":
 
     dashboard_view = st.radio(
         "Vista del dashboard",
-        ["Paciente individual", "Resumen global", "Eventos"],
+        (["Paciente individual", "Resumen global", "Eventos"] if rol_usuario == "MEDICO"
+         else ["Paciente individual", "Eventos"]),
         horizontal=True,
         key="dashboard_view",
     )
@@ -1561,6 +1608,9 @@ elif page == "📉 Dashboard clínico":
             "Alta del tratamiento": "ALTA_TRATAMIENTO",
             "Decisión de consentimiento de IA": "CONSENTIMIENTO_IA",
             "Generación de resumen con IA": "GENERACION_RESUMEN_IA",
+            "Reasignación de tratamiento": "REASIGNACION_TRATAMIENTO",
+            "Baja temporal de clínico": "BAJA_CLINICO",
+            "Reincorporación de clínico": "REINCORPORACION_CLINICO",
             "Eliminación de solicitud": "ELIMINACION_ADMIN_LISTA_ESPERA",
             "Desactivación de tratamiento": "DESACTIVACION_ADMIN_TRATAMIENTO",
             "Eliminación de tratamiento (histórico)": "ELIMINACION_ADMIN_TRATAMIENTO",
@@ -1755,6 +1805,15 @@ elif page == "📖 Registro de visitas":
         else:
             st.info("No hay visitas registradas con esos filtros.")
 
+    if not filtro_nhc or is_valid_nhc(filtro_nhc):
+        st.markdown("### Accesos y rechazos de la API")
+        _, accesos = paginated_table(conn, "security_events", "security_events",
+                                    patient_id=filtro_nhc or None, dni=filtro_dni or None)
+        st.dataframe([{
+            "DNI": r[1], "Operación": r[2], "Resultado": r[3],
+            "Tratamiento": r[4], "NHC": r[5], "Fecha": str(r[6]),
+        } for r in accesos], width="stretch", hide_index=True)
+
 elif page == "⚙️ Ajustes":
     if rol_usuario != "ADMIN":
         st.error("No tienes permisos para acceder a Ajustes.")
@@ -1905,10 +1964,10 @@ elif page == "⚙️ Ajustes":
                 [row[0] for row in get_professions(conn)],
                 key="new_user_profession",
             )
-            new_role = "ADMIN" if new_profession == "Administrador" else "CLINICO"
+            new_role = role_for_profession(new_profession)
             st.text_input(
                 "Rol",
-                value="Administrador" if new_role == "ADMIN" else "Clínico",
+                value=ROLE_LABELS[new_role],
                 disabled=True,
             )
             st.caption("Se generará una contraseña temporal única al crear el usuario.")
@@ -1958,10 +2017,57 @@ elif page == "⚙️ Ajustes":
                 "rol": u[5],
                 "cambio_clave_pendiente": "Sí" if u[6] else "No",
                 "activo": "Sí" if u[7] else "No",
+                "baja temporal": "Sí" if u[9] else "No",
                 "creado": str(u[8])[:19],
             }
         )
     st.dataframe(data_users, width="stretch", hide_index=True)
+
+    st.markdown("### Baja temporal de clínicos")
+    st.caption("La baja conserva el acceso a la cuenta y bloquea nuevas asignaciones. Los tratamientos pendientes pueden reasignarse sin perder su historial.")
+    _, cuentas_baja = paginated_table(conn, "users", "leave_users")
+    opciones_baja = {f"{u[2]} · {u[3]} · {u[4]}" + (" · De baja" if u[9] else ""): u
+                     for u in cuentas_baja if u[5] == "CLINICO" and u[7]}
+    if opciones_baja:
+        cuenta_baja = opciones_baja[st.selectbox("Clínico", list(opciones_baja), key="leave_clinician")]
+        accion_baja = "Reincorporar clínico" if cuenta_baja[9] else "Dar de baja temporal"
+        confirmar_baja = st.checkbox("Confirmo el cambio de disponibilidad", key=f"leave_confirm_{cuenta_baja[0]}_{cuenta_baja[9]}")
+        if st.button(accion_baja, key="save_clinician_leave", disabled=not confirmar_baja):
+            result = set_clinician_leave(conn, cuenta_baja[0], not cuenta_baja[9])
+            st.session_state["leave_notice"] = (
+                f"Baja registrada. {result['active_treatments']} tratamientos activos disponibles para reasignar."
+                if result["on_leave"] else "Clínico reincorporado. No se revierten las reasignaciones ya realizadas."
+            )
+            st.rerun()
+    else:
+        st.info("No hay cuentas clínicas activas en esta página del listado.")
+    notice = st.session_state.pop("leave_notice", None)
+    if notice:
+        st.success(notice)
+
+    st.markdown("### Reasignar tratamientos por baja")
+    nhc_reasignar = st.text_input("Filtrar tratamientos por NHC", max_chars=6, key="reassign_nhc").strip()
+    if nhc_reasignar and not is_valid_nhc(nhc_reasignar):
+        st.info("Introduce las 6 cifras del NHC.")
+    else:
+        _, pendientes = paginated_table(conn, "reassignment_pending", "reassign_pending", patient_id=nhc_reasignar or None)
+        if pendientes:
+            opciones_reasignar = {f"{r[1]} · {r[2]} · {r[3] or 'Sin área'} · {r[5]} · Tratamiento {r[0]}": r for r in pendientes}
+            seleccionado = opciones_reasignar[st.selectbox("Tratamiento pendiente", list(opciones_reasignar), key="reassign_treatment")]
+            st.write(f"Hueco: {seleccionado[6]} · Turno: {seleccionado[7]} · Transporte: {seleccionado[8]} · Hora: {seleccionado[9] or 'Sin fijar'} · Días: {seleccionado[10] or 'Sin registrar'}")
+            _, sustitutos = paginated_table(conn, "available_clinicians", f"reassign_targets_{seleccionado[0]}", rehab_active_id=seleccionado[0])
+            if sustitutos:
+                opciones_sustituto = {f"{u[2]} · {u[1]} · {u[3]}": u[0] for u in sustitutos}
+                sustituto = st.selectbox("Nuevo clínico responsable", list(opciones_sustituto), key=f"reassign_target_{seleccionado[0]}")
+                confirmar = st.checkbox("He comprobado que el sustituto puede atender esta especialidad, área y horario", key=f"reassign_confirm_{seleccionado[0]}_{opciones_sustituto[sustituto]}")
+                if st.button("Reasignar tratamiento", key="reassign_submit", disabled=not confirmar):
+                    result = reassign_treatment(conn, seleccionado[0], seleccionado[4], opciones_sustituto[sustituto])
+                    st.session_state["leave_notice"] = f"Tratamiento del NHC {result['patient_id']} reasignado a {result['assigned_clinician_name']}."
+                    st.rerun()
+            else:
+                st.info("No hay sustitutos disponibles de la misma profesión. Se conserva el tratamiento hasta que puedas reasignarlo.")
+        else:
+            st.info("No hay tratamientos pendientes de reasignación con estos filtros.")
 
     tab1, tab2, tab3 = st.tabs(["Especialidades", "Áreas", "Listado actual"])
 
@@ -2096,7 +2202,7 @@ elif page == "⚙️ Ajustes":
             "Nueva profesión clínica", key="cfg_new_profession"
         )
         st.caption(
-            "Las nuevas profesiones tendrán rol Clínico. Solo Administrador tendrá rol administrativo."
+            "Médico rehabilitador tiene rol Médico; Administrador, rol administrativo. Las demás profesiones tienen rol Clínico."
         )
         if st.button("Añadir profesión clínica", key="cfg_add_profession"):
             if not nueva_profesion.strip():

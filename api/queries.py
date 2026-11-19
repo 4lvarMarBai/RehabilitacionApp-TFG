@@ -5,9 +5,10 @@ from fastapi import HTTPException
 from servidor.ai_policy import ai_use_mode, clinical_consent_version
 from servidor.database import fetch_all
 from api.pagination import paginate_query
+from api.access import clinical_scope, authorized_treatment
 
 
-ADMIN_TABLES = {"admin_waitlist", "admin_active", "user_dni", "areas", "specialties", "professions"}
+ADMIN_TABLES = {"admin_waitlist", "admin_active", "user_dni", "areas", "specialties", "professions", "reassignment_pending", "available_clinicians", "security_events"}
 
 
 def read_table(
@@ -31,6 +32,8 @@ def read_table(
     page_size=50,
 ):
     """Aplica filtros a los listados permitidos y comprueba los permisos administrativos."""
+    if user.get("role") not in {"ADMIN", "CLINICO", "MEDICO"}:
+        raise HTTPException(403, "Rol no autorizado.")
     if name in ADMIN_TABLES and user["role"] != "ADMIN":
         raise HTTPException(403, "Esta consulta requiere un administrador.")
 
@@ -45,9 +48,39 @@ def read_table(
         return paginate_query(connection, base, params[:-1], order_by=order,
                               page=page, page_size=page_size)
 
+    if name == "reassignment_pending":
+        patient_filter = " AND ra.patient_id = %s" if patient_id else ""
+        params = (patient_id, limit) if patient_id else (limit,)
+        return read_rows(conn, f"""
+            SELECT ra.id, ra.patient_id, ra.specialty, ra.subspecialty,
+                   ra.assigned_clinician_dni, ra.assigned_clinician_name,
+                   ra.slot_type, ra.time_preference, ra.transport_mode,
+                   ra.preferred_hour, ra.attendance_days
+            FROM rehab_active ra JOIN users u ON u.dni = ra.assigned_clinician_dni
+            WHERE ra.status = 'ACTIVO' AND u.role = 'CLINICO' AND u.on_leave = TRUE
+            {patient_filter}
+            ORDER BY id ASC LIMIT %s
+        """, params)
+
+    if name == "available_clinicians":
+        if rehab_active_id is None:
+            raise HTTPException(422, "Selecciona el tratamiento que quieres reasignar.")
+        return read_rows(conn, """
+            SELECT target.id, target.dni, target.full_name, target.profession
+            FROM users target
+            JOIN rehab_active ra ON ra.id = %s AND ra.status = 'ACTIVO'
+            JOIN users source ON source.dni = ra.assigned_clinician_dni
+            WHERE source.on_leave = TRUE AND source.role = 'CLINICO'
+              AND target.profession = source.profession AND target.role = 'CLINICO'
+              AND target.active = TRUE AND target.on_leave = FALSE
+              AND target.must_change_password = FALSE AND target.id <> source.id
+            ORDER BY full_name ASC, id ASC LIMIT %s
+        """, (rehab_active_id, limit))
+
     if name == "session_history":
         if rehab_active_id is None:
             raise HTTPException(422, "Falta el tratamiento.")
+        authorized_treatment(conn, rehab_active_id, user)
         return read_rows(conn, """
             SELECT id, rehab_active_id, patient_id, specialty, subspecialty,
                    session_date, session_time, status, absence_reason,
@@ -97,24 +130,26 @@ def read_table(
         "admin_active": "id, patient_id, specialty, subspecialty, start_date",
     }
     if name in active_columns:
+        scope, scope_params = ("TRUE", ()) if name == "admin_active" else clinical_scope(user)
         patient_filter = " AND patient_id = %s" if patient_id else ""
-        params = (patient_id, limit) if patient_id else (limit,)
+        params = (*scope_params, patient_id, limit) if patient_id else (*scope_params, limit)
         return read_rows(
             conn,
-            f"SELECT {active_columns[name]} FROM rehab_active WHERE status = 'ACTIVO'{patient_filter} ORDER BY id DESC LIMIT %s",
+            f"SELECT {active_columns[name]} FROM rehab_active WHERE status = 'ACTIVO' AND ({scope}){patient_filter} ORDER BY id DESC LIMIT %s",
             params,
         )
 
     if name == "discharged":
+        scope, scope_params = clinical_scope(user)
         return read_rows(
             conn,
-            """
+            f"""
             SELECT id, patient_id, specialty, subspecialty, prescribed_sessions,
                    start_date, discharged_at, discharge_reason, discharge_comment
-            FROM rehab_active WHERE status = 'ALTA'
+            FROM rehab_active WHERE status = 'ALTA' AND ({scope})
             ORDER BY discharged_at DESC, id DESC LIMIT %s
         """,
-            (limit,),
+            (*scope_params, limit),
         )
 
     if name == "admin_waitlist":
@@ -156,6 +191,7 @@ def read_table(
     if name == "calendar":
         if rehab_active_id is None or year is None or month is None:
             raise HTTPException(422, "Faltan los datos del calendario.")
+        authorized_treatment(conn, rehab_active_id, user)
         return read_rows(
             conn,
             """
@@ -168,8 +204,31 @@ def read_table(
             (rehab_active_id, year, month),
         )
 
+    if name == "security_events":
+        conditions, params = [], []
+        if patient_id:
+            conditions.append("patient_id = %s")
+            params.append(patient_id)
+        if dni:
+            conditions.append("actor = %s")
+            params.append(dni)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        return read_rows(conn, f"""
+            SELECT id, actor, action, outcome, rehab_active_id, patient_id, created_at
+            FROM security_access_log{where} ORDER BY id DESC LIMIT %s
+        """, (*params, limit))
+
     if name == "audit":
         conditions, params = [], []
+        comment_column = "al.comment"
+        reason_column = "al.reason"
+        if user["role"] == "CLINICO":
+            conditions.append("EXISTS (SELECT 1 FROM rehab_active own WHERE own.assigned_clinician_dni = %s AND (own.id = al.rehab_active_id OR own.source_waitlist_id = al.waitlist_id))")
+            params.append(user["dni"])
+        elif user["role"] == "ADMIN":
+            comment_column = "NULL::text AS comment"
+            reason_column = "NULL::text AS reason"
+            conditions.append("al.event NOT IN ('REGISTRO_SESION', 'ELIMINACION_SESION')")
         for column, value in (
             ("al.specialty", specialty),
             ("al.subspecialty", subspecialty),
@@ -209,7 +268,7 @@ def read_table(
             f"""
             SELECT al.id, al.event, al.patient_id, al.specialty, al.subspecialty,
                    al.waitlist_id, al.rehab_active_id, al.chosen_priority_level,
-                   al.wait_days, al.rule_applied, al.reason, al.comment,
+                   al.wait_days, al.rule_applied, {reason_column}, {comment_column},
                    al.actor, al.created_at, w.eligible,
                    CASE WHEN al.event = 'ALTA_TRATAMIENTO' THEN (
                        SELECT COUNT(*) FROM treatment_sessions AS ts

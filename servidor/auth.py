@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 from servidor.database import fetch_all, execute_sql
+from comun.roles import role_for_profession
 
 
 PROFESIONES_DISPONIBLES = [
@@ -65,7 +66,7 @@ def init_auth_db(conn):
             dni TEXT NOT NULL UNIQUE,
             profession TEXT NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK (role IN ('ADMIN', 'CLINICO')),
+            role TEXT NOT NULL CHECK (role IN ('ADMIN', 'CLINICO', 'MEDICO')),
             must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -89,8 +90,34 @@ def init_auth_db(conn):
     """,
     )
 
+    init_user_roles(conn)
     init_professions_db(conn)
     init_visit_log_db(conn)
+
+
+def init_user_roles(conn):
+    """Actualiza cuentas existentes sin cambiar sus contraseñas ni sus sesiones."""
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS on_leave BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+            cur.execute("""
+                ALTER TABLE users ADD CONSTRAINT users_role_check
+                CHECK (role IN ('ADMIN', 'CLINICO', 'MEDICO'))
+            """)
+            cur.execute("""
+                UPDATE users SET role = 'MEDICO'
+                WHERE profession = 'Médico rehabilitador' AND role = 'CLINICO'
+            """)
+            cur.execute("""
+                UPDATE users SET role = 'CLINICO'
+                WHERE role = 'MEDICO' AND profession <> 'Médico rehabilitador'
+            """)
+            cur.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_medico_profession_check")
+            cur.execute("""
+                ALTER TABLE users ADD CONSTRAINT users_medico_profession_check
+                CHECK (role <> 'MEDICO' OR profession = 'Médico rehabilitador')
+            """)
 
 
 def init_professions_db(conn):
@@ -114,6 +141,7 @@ def create_user(
     conn, username: str, full_name: str, dni: str, profession: str, role: str
 ):
     """Registra una cuenta y devuelve si se ha creado sin duplicar usuario ni DNI."""
+    role = role_for_profession(profession)
     password_hash = hash_password(PASSWORD_TEMPORAL_POR_DEFECTO)
 
     with conn.cursor() as cur:
@@ -278,7 +306,7 @@ def reset_user_password_to_default(conn, user_id: int):
 
 
 USER_LIST_QUERY = """
-    SELECT id, username, full_name, dni, profession, role, must_change_password, active, created_at
+    SELECT id, username, full_name, dni, profession, role, must_change_password, active, created_at, on_leave
     FROM users
 """
 

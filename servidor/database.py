@@ -1,6 +1,8 @@
 """Conexión a PostgreSQL y creación de tablas e índices de la aplicación."""
 
 import os
+from pathlib import Path
+from ipaddress import ip_address
 from datetime import datetime, UTC, date, time
 
 
@@ -11,7 +13,31 @@ def get_database_url() -> str:
         raise RuntimeError(
             "Configura DATABASE_URL en el entorno del servidor o en .env.api."
         )
-    return value
+    return secure_database_url(value)
+
+
+def secure_database_url(value):
+    """Toda conexión fuera del equipo verifica el certificado y el nombre del servidor."""
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+    params = conninfo_to_dict(value)
+    hosts = params.get("host", os.getenv("PGHOST", "")).split(",")
+    addresses = params.get("hostaddr", os.getenv("PGHOSTADDR", "")).split(",")
+
+    def local(host):
+        if not host or host == "localhost" or host.startswith("/"):
+            return True
+        try:
+            return ip_address(host.strip("[]")).is_loopback
+        except ValueError:
+            return False
+
+    if all(local(host) for host in (*hosts, *addresses)):
+        return value
+    ca = params.get("sslrootcert") or os.getenv("DATABASE_SSLROOTCERT", "").strip()
+    if not ca:
+        supabase = all(host.endswith((".supabase.com", ".supabase.co")) for host in hosts)
+        ca = str(Path(__file__).resolve().parents[1] / "recursos/supabase_ca.crt") if supabase else "system"
+    return make_conninfo(value, sslmode="verify-full", sslrootcert=ca)
 
 
 def fetch_all(conn, query, params=()):
@@ -160,7 +186,7 @@ def init_db(conn):
             waitlist_id BIGINT,
             rehab_active_id BIGINT,
             session_id BIGINT,
-            patient_id TEXT NOT NULL,
+            patient_id TEXT,
             specialty TEXT,
             subspecialty TEXT,
             chosen_priority_level TEXT,
@@ -285,6 +311,10 @@ def init_db(conn):
         )
 
         # Índices para filtrar listados y localizar sesiones y referencias.
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_waitlist_patient_area_created "
+            "ON waitlist (patient_id, specialty, subspecialty, created_at DESC)"
+        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_waitlist_pending_filters ON waitlist (specialty, subspecialty, request_date, id) WHERE status = 'EN_ESPERA' AND eligible = TRUE"
         )

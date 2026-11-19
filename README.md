@@ -2,7 +2,7 @@
 
 Aplicación para gestionar solicitudes de rehabilitación, organizar la lista de espera por prioridad y antigüedad, registrar tratamientos y sesiones, consultar la evolución de los pacientes y tramitar altas.
 
-Incluye acceso por roles de administrador y clínico, gestión de usuarios y catálogos, auditoría y generación de resúmenes con IA mediante Ollama. La IA requiere la aceptación registrada del paciente y sus resultados deben ser revisados por un profesional.
+Incluye acceso por roles de administrador, clínico y médico, gestión de usuarios y catálogos, auditoría y generación de resúmenes con IA mediante Ollama. La IA requiere la aceptación registrada del paciente y sus resultados deben ser revisados por un profesional.
 
 ## Módulos del repositorio
 
@@ -87,7 +87,7 @@ PostgreSQL almacena los datos y solo la API utiliza sus credenciales. No subas a
 
 ## Resúmenes con datos reales
 
-El modo predeterminado de la IA es `demo`. El modo clínico ofrece un borrador documental para que el profesional asignado lo contraste con las sesiones originales. La aplicación conserva la decisión del paciente y la referencia al consentimiento explícito documentado conforme al protocolo del centro.
+El modo predeterminado de la IA es `demo`. Solo el rol Médico, vinculado a la profesión Médico rehabilitador, puede generar y consultar resúmenes de IA de los tratamientos de cualquier paciente, sin necesitar una asignación previa. En modo clínico contrasta el resultado con las sesiones originales. La aplicación conserva la decisión del paciente y la referencia al consentimiento explícito documentado conforme al protocolo del centro.
 
 El centro debe validar la finalidad, la seguridad del despliegue y la calidad de los resúmenes antes de habilitar este modo. Debe determinar si el consentimiento es la base adecuada y si el uso previsto está sujeto a la normativa de producto sanitario. La referencia del protocolo es un dato de configuración. El centro conserva la documentación que respalda esa referencia.
 
@@ -99,4 +99,4 @@ AI_CLINICAL_PROTOCOL=REFERENCIA_DEL_PROTOCOLO_APROBADO
 AI_LOCAL_ONLY_CONFIRMED=true
 ```
 
-La comprobación de asignación se aplica a la generación del resumen clínico. Revisa también los permisos de acceso a pacientes en las demás pantallas antes de utilizar la aplicación con datos reales.
+Los clínicos consultan y modifican sus tratamientos asignados; los médicos pueden consultar todos los pacientes y son los únicos que generan resúmenes de IA. El administrador conserva la gestión administrativa y los registros de acceso, sin acceso a notas ni informes clínicos. Las conexiones remotas a PostgreSQL verifican el certificado y el nombre del servidor. Estos controles requieren evaluación en la instalación del centro antes de utilizar datos reales.

@@ -8,6 +8,8 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.db import get_conn
+from comun.roles import can_use_ai_summary
+from api.access import require_care_role
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -95,6 +97,7 @@ def limit_login(conn, request: Request, username: str):
 def current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     conn=Depends(get_conn),
+    request: Request = None,
 ):
     """Comprueba que el token siga vigente y que el usuario permanezca activo."""
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -105,7 +108,7 @@ def current_user(
         cur.execute(
             """
             SELECT u.id, u.username, u.full_name, u.dni, u.profession,
-                   u.role, u.must_change_password
+                   u.role, u.must_change_password, u.on_leave
             FROM api_sessions AS s
             JOIN users AS u ON u.id = s.user_id
             WHERE s.token_hash = %s AND s.expires_at > NOW() AND u.active = TRUE
@@ -119,7 +122,7 @@ def current_user(
             "La sesión ha caducado o ha sido revocada.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return dict(
+    user = dict(
         zip(
             (
                 "id",
@@ -129,18 +132,34 @@ def current_user(
                 "profession",
                 "role",
                 "must_change_password",
+                "on_leave",
             ),
             row,
         )
     )
+    if request is not None:
+        request.state.authenticated_user = user
+    return user
 
 
 def ready_user(user=Depends(current_user)):
     """Exige un rol admitido y el cambio de contraseña cuando sea obligatorio."""
     if user["must_change_password"]:
         raise HTTPException(403, "Debes cambiar la contraseña antes de continuar.")
-    if user["role"] not in {"ADMIN", "CLINICO"}:
+    if user["role"] not in {"ADMIN", "CLINICO", "MEDICO"}:
         raise HTTPException(403, "Rol no autorizado.")
+    return user
+
+
+def care_user(user=Depends(ready_user)):
+    require_care_role(user)
+    return user
+
+
+def medical_user(user=Depends(ready_user)):
+    """Solo el médico rehabilitador puede solicitar resultados de IA."""
+    if not can_use_ai_summary(user):
+        raise HTTPException(403, "Los resúmenes de IA están reservados al médico rehabilitador.")
     return user
 
 

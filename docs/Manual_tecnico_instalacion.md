@@ -1,7 +1,7 @@
 # Manual técnico y de instalación
 
 **Proyecto:** RehabilitacionApp-TFG  
-**Versión del manual:** 1.3, 16 de noviembre de 2026\
+**Versión del manual:** 1.5, 19 de noviembre de 2026\
 **Plataforma de instalación descrita:** Windows, PowerShell y servidor en red local.
 
 ## 1. Alcance
@@ -33,7 +33,7 @@ flowchart LR
 
 El navegador no llama directamente a la API de negocio: Streamlit ejecuta Python en el servidor y realiza esas peticiones. Por eso el cliente puede utilizar `API_BASE_URL=http://127.0.0.1:8000` aunque el navegador esté en otro ordenador.
 
-HTTPS termina en Caddy. Los tramos Caddy–Streamlit y Streamlit–API son HTTP local. Esta configuración no determina si la conexión de PostgreSQL utiliza TLS ni cifra los archivos del disco. Si PostgreSQL está en Supabase, los datos almacenados siguen estando en ese servicio aunque la inferencia de IA sea local.
+HTTPS termina en Caddy. Los tramos Caddy–Streamlit y Streamlit–API son HTTP local. Las conexiones a PostgreSQL fuera del equipo utilizan `sslmode=verify-full`, con comprobación del certificado y del nombre del servidor. HTTPS y TLS no cifran los archivos del disco. Si PostgreSQL está en Supabase, los datos almacenados siguen estando en ese servicio aunque la inferencia de IA sea local.
 
 ## 3. Estructura del repositorio
 
@@ -108,7 +108,11 @@ Las funciones administrativas usan `admin_user`; las clínicas usan `ready_user`
 
 ### 4.2. Escritura de solicitudes y asignaciones
 
-La API valida entradas y catálogos antes de llamar a `add_waiting_patient_multiple`. Esta guarda las entradas de espera y su auditoría en una transacción. En modo de demostración guarda también la decisión simulada sobre IA. En modo clínico, la solicitud puede registrarse sin consentimiento de IA. El profesional asignado registra la decisión documentada desde Seguimiento clínico.
+La API valida entradas y catálogos antes de llamar a `add_waiting_patient_multiple`. Esta guarda las entradas de espera y su auditoría en una transacción. En modo de demostración guarda también la decisión simulada sobre IA. En modo clínico, la solicitud puede registrarse sin consentimiento de IA. El médico rehabilitador puede registrar la decisión documentada desde Seguimiento clínico; el clínico asignado también puede registrarla, pero no puede generar ni consultar resúmenes de IA.
+
+Antes de crear solicitudes, el servidor comprueba si el mismo NHC ya tiene registros para la misma especialidad y área creados en los últimos **tres meses naturales**. Las solicitudes pendientes y las asociadas a un tratamiento activo se comprueban aunque sean anteriores. En especialidades sin áreas, se compara la especialidad y el área vacía. La fecha que se utiliza es la de creación del registro en el sistema, no la fecha de solicitud que introduce el usuario.
+
+Si hay coincidencias, la API responde con un aviso `409 DUPLICATE_REQUEST` sin guardar ninguna entrada del envío. Streamlit muestra las especialidades y áreas afectadas; el usuario puede marcar la confirmación y pulsar de nuevo **Guardar solicitud**. Cualquier cambio en el formulario invalida esa confirmación. El envío confirmado usa `confirm_duplicate=true` y la auditoría de las entradas repetidas deja constancia de la confirmación. Un bloqueo transaccional por NHC evita que dos envíos simultáneos pasen la comprobación antes de guardar el primero. Al actualizar, `python -m api.init_db` añade el índice de consulta por NHC, especialidad, área y fecha sin borrar registros.
 
 `_waiting_filters` comparte condiciones entre vista previa y asignación. El orden SQL es Personal SACYL, urgente, preferente y ordinario, seguido de fecha y de identificador. No hay ascenso de prioridad por superar umbrales de espera.
 
@@ -136,19 +140,28 @@ El listado de auditoría muestra registros existentes de `assignment_log`. Sus r
 
 El filtro de eventos del Dashboard incluye la desactivación administrativa. Los eventos antiguos de eliminación de tratamiento siguen disponibles como históricos. La corrección del código no reescribe los registros previos: si existen eventos `ELIMINACION_SESION` emitidos por la versión anterior sin un borrado real, deben contrastarse con las sesiones conservadas.
 
-El registro de visitas se realiza en el servidor al consultar una historia individual con rol CLINICO. Guarda DNI, NHC y fecha de Europe/Madrid. La clave compuesta evita duplicados para esa combinación durante un día.
+El registro de visitas se realiza en el servidor al consultar una historia individual con rol CLINICO o MEDICO. Guarda DNI, NHC y fecha de Europe/Madrid. La clave compuesta evita duplicados para esa combinación durante un día.
 
 ### 4.4. Integración de IA
+
+Hay tres roles: ADMIN administra usuarios y catálogos; CLINICO registra y consulta la actividad asistencial; MEDICO conserva el acceso asistencial y es el único que puede generar y visualizar los resúmenes de IA. La profesión determina automáticamente el rol: Administrador → ADMIN, Médico rehabilitador → MEDICO y el resto → CLINICO. El cliente no puede elegir un rol más privilegiado enviándolo a la API.
+
+Al reiniciar la API, `init_user_roles()` amplía la restricción de PostgreSQL y convierte las cuentas existentes de Médico rehabilitador con rol CLINICO a MEDICO, sin cambiar DNI ni contraseña. También se ejecuta desde la inicialización completa. Haz una copia de seguridad antes de actualizar una instalación y reinicia API y Streamlit para cargar el nuevo código. La cuenta de base de datos debe poder modificar la tabla `users`. Las cuentas de otras profesiones conservan su rol.
+
+Idealmente, lo hará el médico asignado por el centro al paciente. Esta recomendación no se guarda como una asignación nueva ni restringe el acceso de los demás médicos.
+
+El acceso no combina los tratamientos del paciente en un único informe: el médico selecciona el NHC y el tratamiento concreto en Seguimiento clínico. Puede repetirlo para las distintas especialidades. Los clínicos y los administradores no reciben el texto de IA, aunque escriban manualmente la ruta de la API. El servidor registra `GENERACION_RESUMEN_IA` con DNI del médico, NHC, tratamiento, fecha y huellas del contenido; la consulta individual queda también en el registro diario de visitas. Se auditan las generaciones completadas; los resultados rechazados no se registran como generaciones correctas.
+
 
 La ruta autenticada POST `/treatments/{id}/ai-summary` consulta el tratamiento activo seleccionado y sus sesiones REALIZADA o REVISION con contenido clínico. Identifica las fuentes como F1, F2 y siguientes. El servidor aplica los controles correspondientes al modo configurado.
 
 | Modo | Requisitos para generar | Resultado |
 |---|---|---|
-| `demo`, predeterminado | Aceptación simulada registrada y confirmación explícita de que el caso y los informes son ficticios. | Borrador marcado como demostración, con indicadores y descarga JSON. |
-| `clinical` | Protocolo configurado, instalación local verificada, rol CLINICO, asignación al tratamiento activo y consentimiento explícito documentado para la versión vigente del protocolo. | Borrador descriptivo basado en las sesiones, con fuentes y revisión profesional pendiente. |
+| `demo`, predeterminado | Rol MEDICO (profesión Médico rehabilitador), aceptación simulada registrada y confirmación explícita de que el caso y los informes son ficticios. | Borrador marcado como demostración, con indicadores y descarga JSON. |
+| `clinical` | Protocolo configurado, instalación local verificada, rol MEDICO, tratamiento activo y consentimiento explícito documentado para la versión vigente del protocolo. | Borrador descriptivo basado en las sesiones, con fuentes y revisión profesional pendiente. |
 | IA deshabilitada | Un valor de modo distinto de `demo` o `clinical`, o un modo clínico con configuración incompleta, impide la generación. | La aplicación muestra que la IA está deshabilitada. |
 
-En modo clínico, el profesional registra la aceptación o el rechazo en **Seguimiento clínico**. La aceptación requiere una referencia interna al consentimiento explícito que conserva el centro. Usa un código de hasta 80 caracteres que empiece por letra ASCII o número y utilice solo letras ASCII, números, puntos, guiones, barras o guiones bajos. Registra la retirada como rechazo. Las aceptaciones simuladas y las de otras versiones del protocolo quedan fuera de la comprobación clínica vigente. El servidor vuelve a comprobar la asignación y el consentimiento antes de entregar el borrador.
+En modo clínico, el profesional registra la aceptación o el rechazo en **Seguimiento clínico**. La aceptación requiere una referencia interna al consentimiento explícito que conserva el centro. Usa un código de hasta 80 caracteres que empiece por letra ASCII o número y utilice solo letras ASCII, números, puntos, guiones, barras o guiones bajos. Registra la retirada como rechazo. Las aceptaciones simuladas y las de otras versiones del protocolo quedan fuera de la comprobación clínica vigente. El servidor comprueba en PostgreSQL que la cuenta del médico siga activa, mantenga el rol MEDICO y la profesión Médico rehabilitador, y vuelve a comprobar el consentimiento antes de entregar el borrador. No exige que el tratamiento esté asignado al médico solicitante.
 
 La API envía la solicitud a `/api/chat` en la dirección local del servidor, sin proxies del entorno ni redirecciones. La entrada serializada tiene un máximo de 24.000 caracteres. La minimización oculta algunos identificadores, como NHC, DNI y correo electrónico. Las notas pueden conservar otros datos que identifiquen al paciente y deben tratarse como datos de salud. La API rechaza respuestas inválidas o incompletas. El centro debe verificar con informes representativos que el contexto de Ollama admite el volumen de texto previsto.
 
@@ -387,7 +400,7 @@ OLLAMA_URL=http://127.0.0.1:11434/api/chat
 OLLAMA_MODEL=qwen2.5:7b-instruct
 ```
 
-4. **Reinicia la API y Streamlit.** Con un caso de verificación, comprueba que el clínico asignado puede registrar el consentimiento documentado, generar el borrador y contrastarlo con las sesiones originales. Comprueba que la ausencia de consentimiento, su retirada y la falta de asignación bloquean la generación.
+4. **Reinicia la API y Streamlit.** Con una cuenta Médico rehabilitador (rol MEDICO), comprueba que puede registrar el consentimiento documentado y generar el resumen de un tratamiento activo aunque esté asignado a otro profesional. Comprueba que los roles CLINICO y ADMIN reciben un rechazo al solicitar el resumen, y que la ausencia o retirada de consentimiento y la revocación de la cuenta médica bloquean la entrega.
 5. **Controla la puesta en marcha.** Verifica que el entorno asistencial usa la base, las cuentas y los certificados aprobados por el centro. Si necesitas suspender la función, configura `AI_USE_MODE=disabled` y reinicia la API y Streamlit. Reserva el modo `demo` para el entorno con datos ficticios.
 
 La API espera 480 segundos a Ollama de forma predeterminada. El cliente espera 540 segundos a la API. El error HTTP 504 identifica el agotamiento del tiempo de espera de Ollama.
@@ -448,7 +461,7 @@ Los lanzadores antiguos se han retirado. Para iniciar los tres servicios utiliza
 
 Configura permisos de Windows, copias y conservación de registros según la instalación. No existe en el proyecto una programación automática de copias ni una garantía de restauración. Debe comprobarse la copia y restauración de PostgreSQL y protegerse la autoridad de certificados.
 
-La generación clínica verifica que el usuario esté asignado al tratamiento. Las demás pantallas clínicas siguen aplicando permisos por rol. Antes del despliegue asistencial, el centro debe revisar también el alcance de acceso a pacientes en consultas, historiales, auditoría y descargas, y adaptar los permisos por paciente o unidad cuando corresponda.
+La generación de IA, tanto en demostración como en modo clínico, está reservada al rol MEDICO y a la profesión Médico rehabilitador. Este usuario puede revisar los resúmenes de los tratamientos de cualquier paciente, sin asignación previa. Las demás consultas clínicas verifican la asignación al tratamiento para el rol CLINICO. El médico puede consultar cualquier paciente y el administrador accede a la gestión, pero no a notas ni informes clínicos. Los filtros se aplican en la API y en las consultas SQL antes de paginar, incluidos los accesos directos por identificador. La reasignación cambia qué clínico puede consultar el tratamiento. Antes del despliegue asistencial, el centro debe evaluar si el acceso global médico y la distribución de permisos son adecuados a su organización.
 
 El control de intentos comparte contador por usuario y por dirección vista por la API. En esta arquitectura, las peticiones vienen de Streamlit por localhost, por lo que el límite por IP puede agrupar a varios usuarios. No se interpreta como un bloqueo individual por IP de cada navegador.
 
@@ -460,6 +473,16 @@ El control de intentos comparte contador por usuario y por dirección vista por 
 4. **Seguridad y conservación.** Limita accesos al personal autorizado, protege las comunicaciones con el navegador y PostgreSQL, y aplica medidas proporcionadas para servidor, almacenamiento, credenciales, registros y copias. Define plazos de conservación y procedimientos de restauración, incidentes y ejercicio de derechos. Si un proveedor externo aloja PostgreSQL o accede a datos por cuenta del centro, revisa sus garantías, el contrato de encargo y, cuando proceda, las transferencias internacionales. El acceso a la historia clínica debe respetar las reglas del centro y el deber de secreto. [RGPD, artículos 25, 28, 32 a 34 y 44 a 49](https://eur-lex.europa.eu/eli/reg/2016/679/oj/spa) · [Ley 41/2002, artículos 16 y 17](https://www.boe.es/buscar/act.php?id=BOE-A-2002-22188#a16)
 5. **Validación y revisión profesional.** El centro debe evaluar el modelo y su configuración con informes representativos antes de la puesta en marcha. Comprueba omisiones relevantes, afirmaciones inventadas, fidelidad de fechas, medidas y negaciones, y correspondencia de las fuentes. Establece criterios de aceptación, forma a los profesionales para revisar el borrador y repite la validación si cambia el modelo, sus instrucciones o el flujo de uso. Documenta cómo suspender la función y revisar los incidentes. [Reglamento de IA, artículo 4](https://eur-lex.europa.eu/legal-content/ES/TXT/?uri=CELEX%3A02024R1689-20260727)
 6. **Clasificación sanitaria y de IA.** Evalúa la finalidad prevista con el responsable regulatorio. Si el software se destina a aportar información para decisiones diagnósticas o terapéuticas y se califica como producto sanitario, aplica la regla 11 y determina la clase y el procedimiento de conformidad. Evalúa también el artículo 6 del Reglamento de IA y las obligaciones aplicables según la clasificación y el calendario vigente. La revisión humana forma parte del flujo, pero la clasificación depende de la finalidad y de las funciones reales. [Reglamento de productos sanitarios, artículo 2 y anexo VIII, regla 11](https://eur-lex.europa.eu/eli/reg/2017/745/2026-07-19/spa/pdf) · [Reglamento de IA, artículo 6](https://eur-lex.europa.eu/legal-content/ES/TXT/?uri=CELEX%3A02024R1689-20260727)
+
+### 9.2. Posición regulatoria del código revisado
+
+La revisión del 18 de noviembre de 2026 identifica una plataforma mixta. La gestión de solicitudes, catálogos e historiales tiene argumentos para considerarse administrativa o documental, pero el seguimiento hace más que almacenar notas. `get_clinical_followup_summary()` calcula una tendencia de EVA y señales de posible abandono y estancamiento. `format_clinical_followup_report()` recomienda revisar el plan terapéutico ante esa última señal. Estas funciones no dependen de Ollama: desactivar la IA no las elimina.
+
+En el modo clínico, Ollama clasifica fragmentos y el servidor reconstruye el resumen con referencias a las fuentes. Esto limita la redacción libre, pero conserva una selección de información para pacientes individuales. No debe darse por probado que el módulo está excluido de la normativa sanitaria por llamarlo resumen o por exigir revisión médica. El encuadre recomendado es **prototipo con funciones clínicas candidatas a software producto sanitario**. La clase IIa es una hipótesis para un alcance no urgente delimitado, pendiente de concretar población, decisiones apoyadas, riesgos y clasificación. No es un dictamen oficial. [MDCG 2019-11, revisión de 2025](https://health.ec.europa.eu/system/files/2025-06/mdcg_2019_11_en.pdf) · [MDCG 2021-24, revisión de 2026](https://health.ec.europa.eu/document/download/cbb19821-a517-4e13-bf87-fdc6ddd1782e_en)
+
+La autorización del hospital no sustituye la evaluación regulatoria ni los requisitos aplicables a la puesta en servicio. Tampoco lo hacen los resultados favorables de los 50 casos ficticios. No se ha identificado en la documentación revisada un expediente completo de conformidad que acredite la habilitación del producto para soporte diagnóstico. Si se sigue la vía ordinaria de un producto IIa, deberán completarse sus requisitos con intervención de un organismo notificado. La vía de fabricación interna tiene condiciones específicas: no basta con instalar el repositorio y considerarlo automáticamente un producto del hospital. [Requisitos de la AEMPS](https://www.aemps.gob.es/productos-sanitarios/productos-sanitarios/comercializacion-de-productos-sanitarios-en-espana/que-requisitos-deben-cumplir-los-productos-sanitarios/) · [Instrucción de uso interno hospitalario](https://www.aemps.gob.es/productosSanitarios/prodSanitarios/docs/folletos-instrucciones-formularios/Instruccion-procedimiento-comunicacion-fabricacion-ppss-uso-in-house.pdf)
+
+Antes de un uso asistencial, deben delimitarse las funciones y documentarse la decisión regulatoria; la AEMPS publica un procedimiento específico de consulta. La configuración `AI_USE_MODE=clinical` únicamente habilita controles técnicos y no equivale a una autorización legal. [Consulta de cualificación y clasificación](https://www.aemps.gob.es/productos-sanitarios/consultas-relativas-a-la-cualificacion-y-clasificacion-de-productos-sanitarios-y-productos-sanitarios-de-diagnostico-in-vitro/)
 
 ## 10. Rutas principales para mantenimiento
 
@@ -504,7 +527,7 @@ Comprueba también el arranque y la parada desde los accesos del servidor. Antes
 | `ERR_CERT_AUTHORITY_INVALID` | Instala el certificado de la autoridad actual para el usuario del navegador y reinícialo. |
 | Error de nombre del certificado | Comprueba que URL e IP del Caddyfile coincidan; si cambia IP, actualiza y recarga Caddy. |
 | `ERR_CONNECTION_TIMED_OUT` | Revisa IP activa, cortafuegos, perfil Privado y comunicación entre subredes. |
-| IA no genera | Revisa Ollama, modelo, tamaño de entrada y modo configurado. En `demo`, comprueba la aceptación simulada y la confirmación ficticia. En `clinical`, verifica el protocolo, la configuración local, la asignación al tratamiento y el consentimiento vigente. |
+| IA no genera | Revisa Ollama, modelo, tamaño de entrada y modo configurado. En `demo`, comprueba la aceptación simulada y la confirmación ficticia. En ambos modos utiliza una cuenta de Médico rehabilitador con rol MEDICO. En `clinical`, verifica además el protocolo, la configuración local y el consentimiento vigente; no se exige asignación al tratamiento. |
 | IA devuelve 504 | Ollama agotó el tiempo de espera. Revisa la carga del servidor y vuelve a intentarlo con un conjunto de informes que se ajuste al contexto validado. |
 
 Desde el otro equipo, prueba TCP 443 en PowerShell:
@@ -548,3 +571,41 @@ Para los puestos de usuario de esta arquitectura basta con el enlace y el certif
 - La corrección de sesiones no tiene una interfaz general de edición y eliminación individual.
 - La coordinación entre tratamientos depende de los nombres concretos que reconoce `FISIO_ESPECIALIDADES`; ampliar un catálogo no amplía automáticamente esas reglas.
 - El traslado de la aplicación a un hospital requiere revisar permisos por paciente, infraestructura, bases jurídicas, conservación, seguridad y validación con los responsables correspondientes.
+
+
+### Baja temporal y reasignación de tratamientos
+
+En **Ajustes → Baja temporal de clínicos**, el administrador puede marcar una cuenta de rol CLINICO como de baja o reincorporarla. Es una ausencia temporal: conserva el acceso, el DNI, la contraseña y el historial, pero impide recibir nuevas asignaciones. La columna `users.on_leave` se añade automáticamente al reiniciar la API.
+
+Los tratamientos activos del clínico de baja aparecen en **Reasignar tratamientos por baja**, con búsqueda por NHC y paginación. El administrador elige un tratamiento y un sustituto activo, disponible, de la misma profesión y con la contraseña inicial cambiada. Debe comprobar que puede atender la especialidad, el área y el horario: el catálogo de profesiones no acredita esas competencias ni calcula su capacidad asistencial. Si no hay sustituto, el tratamiento sigue activo y pendiente, sin crear una solicitud nueva ni borrar sesiones.
+
+La reasignación cambia únicamente el DNI, nombre y profesión del responsable del tratamiento. Conserva su identificador, solicitud de origen, fechas iniciales, horario, transporte, metas e informes. El autor de las sesiones anteriores permanece intacto. Reincorporar al clínico no devuelve automáticamente los pacientes ya reasignados.
+
+Las rutas PUT `/admin/users/{id}/leave` y POST `/admin/treatments/{id}/reassign` exigen rol ADMIN. Se bloquean las filas durante las operaciones y se comprueba que el tratamiento no haya cambiado desde que se seleccionó. Un clínico de baja no puede eludir la restricción llamando directamente a la asignación de la API. El cambio de responsable y su auditoría se guardan juntos; si falla la auditoría, se revierte la reasignación.
+
+La auditoría registra `BAJA_CLINICO`, `REINCORPORACION_CLINICO` y `REASIGNACION_TRATAMIENTO`. El último incluye NHC, tratamiento, especialidad, clínico anterior, nuevo clínico, administrador y fecha. La baja no altera los permisos exclusivos del rol Médico para los resúmenes de IA.
+
+
+### Controles de acceso y transporte incorporados
+
+| Rol | Acceso asistencial | Administración |
+|---|---|---|
+| CLINICO | Tratamientos actualmente asignados a su DNI, incluidas sus sesiones e historial. Registra sesiones y altas. Los listados y la auditoría se filtran por esa asignación. | Sin gestión de usuarios ni catálogos. |
+| MEDICO | Puede consultar los tratamientos de todos los pacientes. Es el único que genera resúmenes de IA, con los controles de consentimiento y modo correspondientes. | No dispone de funciones administrativas. |
+| ADMIN | Gestiona solicitudes, usuarios, catálogos, bajas y reasignaciones. No recibe notas clínicas, informes de seguimiento, resúmenes de IA ni comentarios y motivos libres de la auditoría clínica. | Consulta los registros de visitas y de seguridad. |
+
+La lista de espera y los contadores generales de actividad conservan su finalidad operativa. Los indicadores clínicos globales del Dashboard se reservan al médico. La interfaz adapta sus opciones, pero la protección se aplica también cuando se llama directamente a la API. Al cambiar de identidad o de rol se elimina el estado temporal; un rechazo de acceso invalida la caché de la petición y los resultados temporales de IA.
+
+Las consultas individuales se registran en `security_access_log` con DNI, operación, resultado, tratamiento, NHC y fecha con hora. `clinical_visit_log` mantiene además el registro de una visita por DNI, NHC y día. Los rechazos de acceso se registran con una conexión independiente para conservarlos aunque se revierta la operación. No se guardan contraseñas, tokens ni notas en ese registro; las rutas se identifican por su plantilla, sin copiar parámetros libres. Si falla la auditoría de una lectura clínica, la API no entrega los datos. Si falla el registro de un rechazo, mantiene el rechazo y deja un aviso técnico sin información clínica. Son registros de aplicación, no un almacén inmutable frente al propietario de PostgreSQL. El centro debe proteger sus permisos y definir conservación y revisión.
+
+El nuevo registro está en **Registro de visitas → Accesos y rechazos de la API**. Las búsquedas y la paginación no descargan toda la tabla. Los rechazos pueden carecer de NHC cuando la cuenta no estaba autorizada para conocerlo; para verlos, deje vacío ese filtro.
+
+`get_database_url()` aplica verificación TLS a las conexiones que no son de loopback o socket local. Para Supabase se incluye su CA pública en `recursos/supabase_ca.crt`. Se obtuvo del repositorio de descargas HTTPS del proveedor: `https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt`. Su SHA-256 es `700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7`. El certificado es público y no contiene claves privadas. Antes de una instalación, contraste la CA con la que facilita el panel del proyecto. Si el proveedor cambia el certificado raíz, actualice la copia desde una fuente oficial.
+
+Para otra autoridad certificadora, configure `DATABASE_SSLROOTCERT` con la ruta absoluta a su certificado PEM, o indique `sslrootcert` en la conexión. Para otros servidores remotos se usa por defecto el almacén de confianza `system` de libpq. Un fallo de verificación impide conectar: no se reduce automáticamente a `require` ni se desactiva la comprobación. Para PostgreSQL exclusivamente local se mantiene la configuración explícita del administrador.
+
+Caddy conserva HTTPS con la autoridad local e incorpora protección frente a inclusión en marcos, detección de tipos de contenido y envío de referencias. Las respuestas dinámicas llevan `Cache-Control: no-store`; los archivos estáticos mantienen su caché. La API también marca sus respuestas como no almacenables. El arranque conserva API y Streamlit en `127.0.0.1` y activa expresamente los controles CORS y XSRF de Streamlit. No se expone la API a otros equipos ni se cambia la autoridad de certificados ya instalada.
+
+Al reiniciar la API se crea la tabla de seguridad. La auditoría general admite NHC vacío para las bajas y reincorporaciones del personal, que no pertenecen a un paciente concreto; las operaciones asistenciales siguen registrando su NHC. Reinicie API, Streamlit y Caddy tras actualizar. Las pruebas verifican estos comportamientos, pero no sustituyen una auditoría independiente, el análisis de riesgos del centro ni la evaluación regulatoria del módulo clínico.
+
+Referencias técnicas: [TLS de PostgreSQL](https://www.postgresql.org/docs/current/libpq-ssl.html), [SSL de Supabase](https://supabase.com/docs/guides/platform/ssl-enforcement) y [cabeceras de Caddy](https://caddyserver.com/docs/caddyfile/directives/header).

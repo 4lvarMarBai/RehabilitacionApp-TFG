@@ -9,8 +9,11 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from api.access import clinical_scope, log_access
 from psycopg_pool import PoolTimeout
 
+from servidor import clinician_leave
 from servidor import auth
 from servidor import catalogos as cat
 from servidor import services as svc
@@ -33,6 +36,8 @@ from api.schemas import (
     WaitingRequest,
     ProfessionCreate,
     ProfessionState,
+    ClinicianLeave,
+    TreatmentReassignment,
 )
 from api.schemas import AISummaryRequest
 from servidor.ai_policy import (
@@ -41,6 +46,8 @@ from servidor.ai_policy import (
 )
 from api.security import (
     admin_user,
+    medical_user,
+    care_user,
     bearer,
     current_user,
     issue_session,
@@ -49,6 +56,7 @@ from api.security import (
     token_hash,
 )
 from api.serialization import encode, table
+from comun.roles import can_use_ai_summary, role_for_profession
 from servidor.database import fetch_all, iso_utc_from_date
 from comun.validators import (
     is_valid_dni,
@@ -86,8 +94,18 @@ async def invalid_operation(_request: Request, exc: ValueError):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+@app.exception_handler(svc.DuplicateRequestError)
+async def duplicate_request(_request: Request, exc: svc.DuplicateRequestError):
+    return JSONResponse(status_code=409, content={"detail": {
+        "code": "DUPLICATE_REQUEST",
+        "message": str(exc),
+        "duplicates": exc.duplicates,
+    }})
+
+
 @app.exception_handler(PermissionError)
 async def forbidden_operation(_request: Request, exc: PermissionError):
+    record_denial(_request, 403)
     return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 
@@ -120,32 +138,63 @@ async def unexpected_error(_request: Request, exc: Exception):
 
 
 def treatment(conn, rehab_id: int, *, active=False, viewer=None):
-    if viewer is not None and viewer["role"] == "CLINICO":
-        columns, rows = fetch_all(
-            conn,
-            """
-            WITH selected AS (
-                SELECT * FROM rehab_active WHERE id = %s
-            ), recorded AS (
-                INSERT INTO clinical_visit_log (clinician_dni, patient_id, visit_date)
-                SELECT %s, patient_id, (NOW() AT TIME ZONE 'Europe/Madrid')::date
-                FROM selected
-                ON CONFLICT DO NOTHING
-            )
-            SELECT * FROM selected
-        """,
-            (rehab_id, viewer["dni"]),
+    scope, scope_params = clinical_scope(viewer or {})
+    lock = " FOR UPDATE" if active else ""
+    columns, rows = fetch_all(conn, f"""
+        WITH selected AS (
+            SELECT * FROM rehab_active WHERE id = %s AND ({scope}){lock}
+        ), visited AS (
+            INSERT INTO clinical_visit_log (clinician_dni, patient_id, visit_date)
+            SELECT %s, patient_id, (NOW() AT TIME ZONE 'Europe/Madrid')::date FROM selected
+            ON CONFLICT DO NOTHING
+        ), audited AS (
+            INSERT INTO security_access_log(actor, action, outcome, rehab_active_id, patient_id)
+            SELECT %s, 'LECTURA_TRATAMIENTO', 'PERMITIDO', id, patient_id FROM selected
         )
-    else:
-        columns, rows = fetch_all(
-            conn, "SELECT * FROM rehab_active WHERE id = %s", (rehab_id,)
-        )
+        SELECT * FROM selected
+    """, (rehab_id, *scope_params, viewer["dni"], viewer["dni"]))
     if not rows:
-        raise HTTPException(404, "El tratamiento no existe.")
+        raise HTTPException(403, "No tienes acceso a este tratamiento o ya no está disponible.")
     result = dict(zip(columns, rows[0]))
     if active and result["status"] != "ACTIVO":
         raise HTTPException(409, "El tratamiento ya no está activo.")
     return result
+
+
+def record_denial(request, status):
+    pool = getattr(request.app.state, "pool", None)
+    if pool is None:
+        return
+    route = getattr(request.scope.get("route"), "path", "sin_ruta")
+    user = getattr(request.state, "authenticated_user", None)
+    try:
+        rehab_id = int(request.path_params.get("rehab_id", ""))
+        rehab_id = rehab_id if 0 < rehab_id < 2**63 else None
+    except (ValueError, TypeError):
+        rehab_id = None
+    try:
+        # Una conexión independiente conserva el rechazo aunque la operación se revierta.
+        with pool.connection(timeout=5) as conn:
+            log_access(conn, user, f"HTTP_{status}:{route}", "DENEGADO", rehab_id)
+    except Exception:
+        # Un fallo de registro nunca debe convertir una denegación en una entrega de datos.
+        logger.error("No se pudo registrar un rechazo de acceso; no se entregaron datos.")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: Request, exc: StarletteHTTPException):
+    if exc.status_code in {401, 403, 429}:
+        record_denial(request, exc.status_code)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.middleware("http")
+async def private_responses(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/health")
@@ -176,7 +225,7 @@ def bootstrap(
     # Una sola petición para autenticar y preparar la cabecera y los filtros.
     if user["must_change_password"]:
         return {"user": user}
-    if user["role"] not in ("ADMIN", "CLINICO"):
+    if user["role"] not in ("ADMIN", "CLINICO", "MEDICO"):
         raise HTTPException(403, "Rol no autorizado.")
     result = {
         "user": user,
@@ -375,12 +424,13 @@ def create_request(
         preferred_hour=body.preferred_hour,
         coordination_rule=body.coordination_rule,
         ai_consent_accepted=body.ai_consent_accepted,
+        confirm_duplicate=body.confirm_duplicate,
     )
     return {"ok": True}
 
 
 @app.post("/treatments/assign")
-def assign(body: Assignment, user=Depends(ready_user), conn=Depends(get_conn)):
+def assign(body: Assignment, user=Depends(care_user), conn=Depends(get_conn)):
     result = svc.assign_next_patient(
         conn,
         assigned_by=user["dni"],
@@ -399,22 +449,22 @@ def assign(body: Assignment, user=Depends(ready_user), conn=Depends(get_conn)):
 
 @app.post("/treatments/{rehab_id}/discharge")
 def discharge(
-    rehab_id: int, body: Discharge, user=Depends(ready_user), conn=Depends(get_conn)
+    rehab_id: int, body: Discharge, user=Depends(care_user), conn=Depends(get_conn)
 ):
     if body.reason == "OTRO" and not body.comment.strip():
         raise HTTPException(400, "Debes indicar un comentario para el motivo OTRO.")
-    return {
-        "ok": svc.discharge_patient(
-            conn, rehab_id, body.reason, body.comment, user["dni"]
-        )
-    }
+    with conn.transaction():
+        treatment(conn, rehab_id, active=True, viewer=user)
+        return {
+            "ok": svc.discharge_patient(conn, rehab_id, body.reason, body.comment, user["dni"])
+        }
 
 
 @app.post("/treatments/{rehab_id}/sessions")
 def add_session(
     rehab_id: int,
     body: TreatmentSession,
-    user=Depends(ready_user),
+    user=Depends(care_user),
     conn=Depends(get_conn),
 ):
     with conn.transaction():
@@ -423,7 +473,7 @@ def add_session(
             cur.execute(
                 "SELECT id FROM rehab_active WHERE id = %s FOR UPDATE", (rehab_id,)
             )
-        selected = treatment(conn, rehab_id, active=True)
+        selected = treatment(conn, rehab_id, active=True, viewer=user)
         if body.status in {"REALIZADA", "REVISION"}:
             error = validar_hora_sesion(selected, body.session_time_value)
             if error:
@@ -473,23 +523,23 @@ def sessions(
     rehab_id: int,
     page: int | None = Query(default=None, ge=1, le=1_000_000_000),
     page_size: int = Query(default=50, ge=1, le=100),
-    _user=Depends(ready_user), conn=Depends(get_conn),
+    _user=Depends(care_user), conn=Depends(get_conn),
 ):
-    treatment(conn, rehab_id, viewer=_user)
     if page is not None:
         return encode(read_table(conn, "session_history", _user,
                                  rehab_active_id=rehab_id, page=page, page_size=page_size))
+    treatment(conn, rehab_id, viewer=_user)
     return table(svc.get_treatment_sessions(conn, rehab_id))
 
 
 @app.get("/treatments/{rehab_id}/session-summary")
-def session_summary(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def session_summary(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     treatment(conn, rehab_id, viewer=_user)
     return svc.get_session_summary(conn, rehab_id)
 
 
 @app.get("/treatments/{rehab_id}/followup")
-def followup_bundle(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def followup_bundle(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     """Comparte los mismos indicadores entre el resumen y el informe."""
     treatment(conn, rehab_id, viewer=_user)
     summary = svc.get_clinical_followup_summary(conn, rehab_id)
@@ -499,33 +549,33 @@ def followup_bundle(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_c
 
 
 @app.get("/treatments/{rehab_id}/followup-summary")
-def followup_summary(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def followup_summary(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     treatment(conn, rehab_id, viewer=_user)
     return encode(svc.get_clinical_followup_summary(conn, rehab_id))
 
 
 @app.get("/treatments/{rehab_id}/report")
-def report(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def report(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     treatment(conn, rehab_id, viewer=_user)
     return {"report": svc.generate_clinical_followup_report(conn, rehab_id)}
 
 
 @app.get("/treatments/{rehab_id}/pain-series")
-def pain_series(rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)):
+def pain_series(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     treatment(conn, rehab_id, viewer=_user)
     return table(svc.get_patient_pain_series(conn, rehab_id))
 
 
 @app.get("/treatments/{rehab_id}/status-distribution")
 def status_distribution(
-    rehab_id: int, _user=Depends(ready_user), conn=Depends(get_conn)
+    rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)
 ):
     treatment(conn, rehab_id, viewer=_user)
     return table(svc.get_patient_status_distribution(conn, rehab_id))
 
 
 @app.get("/dashboard/{name}")
-def dashboard(name: str, _user=Depends(ready_user), conn=Depends(get_conn)):
+def dashboard(name: str, _user=Depends(medical_user), conn=Depends(get_conn)):
     operations = {
         "specialties": svc.get_dashboard_specialty_summary,
         "sessions": svc.get_dashboard_session_summary,
@@ -547,14 +597,22 @@ def get_consent(
         raise HTTPException(422, "El NHC debe tener seis cifras.")
     mode = ai_use_mode()
     if mode == "demo":
-        return {"accepted": svc.get_patient_ai_consent(conn, patient_id), "can_manage": True}
+        allowed = can_use_ai_summary(user) or (
+            user["role"] == "CLINICO"
+            and svc.has_clinical_assignment(conn, patient_id, user["dni"], rehab_id)
+        )
+        return {"accepted": svc.get_patient_ai_consent(conn, patient_id) if allowed else None,
+                "can_manage": allowed, "can_generate": can_use_ai_summary(user)}
     allowed = (
         mode == "clinical"
-        and user["role"] == "CLINICO"
-        and svc.has_clinical_assignment(conn, patient_id, user["dni"], rehab_id)
+        and (can_use_ai_summary(user) or (
+            user["role"] == "CLINICO"
+            and svc.has_clinical_assignment(conn, patient_id, user["dni"], rehab_id)
+        ))
     )
     return {
         "can_manage": allowed,
+        "can_generate": mode == "clinical" and can_use_ai_summary(user),
         "consent_version": clinical_consent_version() if allowed else None,
         "accepted": svc.get_patient_ai_consent(conn, patient_id, version=clinical_consent_version())
         if allowed else None,
@@ -563,7 +621,7 @@ def get_consent(
 
 @app.put("/patients/{patient_id}/ai-consent")
 def save_consent(
-    patient_id: str, body: Consent, user=Depends(ready_user), conn=Depends(get_conn)
+    patient_id: str, body: Consent, user=Depends(care_user), conn=Depends(get_conn)
 ):
     if len(patient_id) != 6 or not patient_id.isascii() or not patient_id.isdigit():
         raise HTTPException(422, "El NHC debe tener seis cifras.")
@@ -571,8 +629,9 @@ def save_consent(
     if mode == "disabled":
         raise PermissionError("La IA está deshabilitada.")
     if mode == "clinical":
-        if user["role"] != "CLINICO" or not svc.has_clinical_assignment(
-            conn, patient_id, user["dni"]
+        if not can_use_ai_summary(user) and not (
+            user["role"] == "CLINICO"
+            and svc.has_clinical_assignment(conn, patient_id, user["dni"])
         ):
             raise PermissionError("Se requiere una asignación clínica activa para este paciente.")
         if body.accepted and not body.evidence_reference:
@@ -582,6 +641,8 @@ def save_consent(
             version=clinical_consent_version(), evidence_reference=body.evidence_reference,
         )
     else:
+        if not can_use_ai_summary(user) and not svc.has_clinical_assignment(conn, patient_id, user["dni"]):
+            raise PermissionError("No tienes una asignación activa para este paciente.")
         svc.set_patient_ai_consent(conn, patient_id, body.accepted, user["dni"])
     return {"ok": True}
 
@@ -590,18 +651,17 @@ def save_consent(
 def ai_summary(
     rehab_id: int,
     body: AISummaryRequest,
-    user=Depends(ready_user),
+    user=Depends(medical_user),
     conn=Depends(get_conn),
 ):
     mode = require_summary_mode(body.synthetic_data_confirmed)
-    if mode == "clinical" and user["role"] != "CLINICO":
-        raise PermissionError("La generación clínica requiere el perfil de profesional clínico.")
     if not ai_slot.acquire(blocking=False):
         raise HTTPException(
             429, "Ya hay un informe de IA en proceso. Inténtalo después."
         )
     try:
-        # Esta función vuelve a comprobar el consentimiento en el servidor.
+        treatment(conn, rehab_id, active=True, viewer=user)
+        # Esta función vuelve a comprobar el consentimiento y el rol en el servidor.
         summary, model = svc.generate_ai_clinical_summary(
             conn,
             rehab_id,
@@ -661,7 +721,7 @@ def create_user(body: UserCreate, _admin=Depends(admin_user), conn=Depends(get_c
         )
     if body.profession not in [row[0] for row in cat.get_professions(conn)]:
         raise HTTPException(400, "Profesión no válida.")
-    role = "ADMIN" if body.profession == "Administrador" else "CLINICO"
+    role = role_for_profession(body.profession)
     temporary_password = secrets.token_urlsafe(15)
     with conn.transaction():
         created = auth.create_user(
@@ -678,6 +738,22 @@ def create_user(body: UserCreate, _admin=Depends(admin_user), conn=Depends(get_c
         "temporary_password": temporary_password if created else None,
         "username": username,
     }
+
+
+@app.put("/admin/users/{user_id}/leave")
+def clinician_leave_state(
+    user_id: int, body: ClinicianLeave, admin=Depends(admin_user), conn=Depends(get_conn)
+):
+    return clinician_leave.set_clinician_leave(conn, user_id, body.on_leave, admin["dni"])
+
+
+@app.post("/admin/treatments/{rehab_id}/reassign")
+def reassign_treatment(
+    rehab_id: int, body: TreatmentReassignment, admin=Depends(admin_user), conn=Depends(get_conn)
+):
+    return clinician_leave.reassign_treatment(
+        conn, rehab_id, body.expected_clinician_dni, body.target_user_id, admin["dni"]
+    )
 
 
 @app.post("/admin/users/{user_id}/reset-password")

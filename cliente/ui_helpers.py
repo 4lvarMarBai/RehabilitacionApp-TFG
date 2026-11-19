@@ -14,6 +14,29 @@ def mostrar_informe_texto(etiqueta, texto, *, altura):
     st.text_area(etiqueta, value=texto, height=altura, disabled=True)
 
 
+def mostrar_aviso_solicitud_repetida(firma):
+    """La confirmación solo vale para los datos del formulario que causaron el aviso."""
+    pendiente = st.session_state.get("req_duplicate_pending")
+    if pendiente and pendiente["signature"] != firma:
+        st.session_state.pop("req_duplicate_pending", None)
+        st.session_state.pop("req_duplicate_confirm", None)
+        pendiente = None
+    if not pendiente:
+        return False
+    st.warning(
+        "Este NHC ya está registrado en la misma especialidad y área. "
+        "Hay solicitudes de los últimos tres meses, pendientes o con tratamiento activo. "
+        "Revisa los registros antes de continuar. Todavía no se ha guardado la nueva solicitud."
+    )
+    for registro in pendiente["duplicates"]:
+        etiqueta = specialty_label(registro["specialty"], registro["subspecialty"])
+        st.write(f"• {etiqueta}: {registro['count']} registro(s) coincidente(s).")
+    return st.checkbox(
+        "He revisado el aviso y quiero crear la solicitud de todos modos",
+        key="req_duplicate_confirm",
+    )
+
+
 def campos_seguimiento_rodilla(rehab_id):
     """Recoge el TUG general y, por separado, las medidas específicas de rodilla."""
     if st.session_state.pop(f"knee_clear_{rehab_id}", False):
@@ -296,5 +319,8 @@ def audit_event_label(event):
         "ELIMINACION_ADMIN_TRATAMIENTO": "Eliminación administrativa de tratamiento",
         "DESACTIVACION_ADMIN_TRATAMIENTO": "Desactivación administrativa de tratamiento",
         "CONSENTIMIENTO_IA": "Decisión sobre el uso de IA",
+        "BAJA_CLINICO": "Baja temporal de clínico",
+        "REINCORPORACION_CLINICO": "Reincorporación de clínico",
+        "REASIGNACION_TRATAMIENTO": "Reasignación de tratamiento",
         "GENERACION_RESUMEN_IA": "Generación de resumen con IA",
     }.get(event, (event or "Evento sin identificar").replace("_", " ").capitalize())
