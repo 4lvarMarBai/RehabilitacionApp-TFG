@@ -260,7 +260,12 @@ AI_USE_MODE="demo"
 
 No pegues estas asignaciones directamente como comandos de PowerShell. Son contenido del archivo. La contraseña con caracteres reservados de una URI debe codificarse correctamente. En un proveedor remoto utiliza su cadena indicada y configura la protección TLS de PostgreSQL según sus instrucciones: el certificado de Caddy no protege ese tramo.
 
-El administrador inicial solo se crea si no existe. Cambiar `ADMIN_INITIAL_PASSWORD` no cambia la contraseña de un administrador ya registrado. No compartas `.env.api` con los usuarios.
+El administrador inicial solo se crea si no existe. Sus credenciales para el primer acceso son:
+
+- **Usuario:** `admin`.
+- **Contraseña:** la que hayas elegido en `ADMIN_INITIAL_PASSWORD`, dentro de `configuracion/.env.api`. Debe tener al menos 12 caracteres; el texto del ejemplo es un marcador que debes sustituir, no una contraseña predeterminada.
+
+La aplicación obliga a cambiar esa contraseña en el primer acceso. Cambiar después `ADMIN_INITIAL_PASSWORD` no modifica la contraseña de un administrador ya registrado. El archivo `.env.api` está excluido de Git y no debe compartirse con los usuarios.
 
 ### 6.4. Configurar Streamlit
 
