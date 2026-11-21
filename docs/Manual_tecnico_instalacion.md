@@ -1,7 +1,7 @@
 # Manual técnico y de instalación
 
 **Proyecto:** RehabilitacionApp-TFG  
-**Versión del manual:** 1.5, 19 de noviembre de 2026\
+**Versión del manual:** 1.6, 20 de noviembre de 2026\
 **Plataforma de instalación descrita:** Windows, PowerShell y servidor en red local.
 
 ## 1. Alcance
@@ -11,6 +11,10 @@ Este documento explica la estructura, la instalación y la operación de la apli
 Hay dos equipos conceptualmente distintos: el **servidor**, que ejecuta los procesos, y el **puesto del usuario**, que abre un navegador. Pueden ser el mismo ordenador durante las pruebas.
 
 Las rutas de ejemplo corresponden a la instalación de Alvar. En otro equipo deben sustituirse por la carpeta real. Los comandos se ejecutan en PowerShell salvo indicación expresa.
+
+Para instalar por primera vez, sigue el [apartado 6](#6-instalación-del-equipo-servidor) en orden. El [apartado 7](#7-preparar-un-puesto-de-usuario) explica los puestos adicionales y el [apartado 8](#8-accesos-directos-y-operación-diaria), el arranque y la parada habituales. Los apartados 2 a 5 describen el funcionamiento interno.
+
+En los comandos, `.` representa la carpeta actual y `.\` indica que la ruta parte de ella. Antes de ejecutarlos, comprueba que estás en la raíz del repositorio, donde están `README.md`, `requirements.txt` y las carpetas `api`, `cliente` y `servidor`. Los bloques `ini` y `toml` son contenido de archivos: no se pegan como órdenes de PowerShell.
 
 ## 2. Arquitectura y comunicaciones
 
@@ -34,6 +38,20 @@ flowchart LR
 El navegador no llama directamente a la API de negocio: Streamlit ejecuta Python en el servidor y realiza esas peticiones. Por eso el cliente puede utilizar `API_BASE_URL=http://127.0.0.1:8000` aunque el navegador esté en otro ordenador.
 
 HTTPS termina en Caddy. Los tramos Caddy–Streamlit y Streamlit–API son HTTP local. Las conexiones a PostgreSQL fuera del equipo utilizan `sslmode=verify-full`, con comprobación del certificado y del nombre del servidor. HTTPS y TLS no cifran los archivos del disco. Si PostgreSQL está en Supabase, los datos almacenados siguen estando en ese servicio aunque la inferencia de IA sea local.
+
+### 2.1. Términos utilizados
+
+| Término | Significado en esta instalación |
+|---|---|
+| Servidor | Ordenador que ejecuta la aplicación y debe permanecer encendido durante su uso. |
+| `localhost` o `127.0.0.1` | El propio ordenador desde el que se usa esa dirección; no identifica siempre al servidor. |
+| API | Servicio que recibe las operaciones de Streamlit, comprueba permisos y consulta la base de datos. |
+| Proxy inverso | Función de Caddy: recibe la conexión del navegador y la reenvía a Streamlit. |
+| Token y huella | Código temporal de sesión y valor calculado a partir de él. La API compara las huellas para comprobar la sesión. |
+| HTTPS y TLS | Protección de las comunicaciones. El certificado identifica al servidor y debe ser de confianza para quien se conecta. |
+| CA | Autoridad que emite certificados. La CA local de Caddy y la que valida PostgreSQL remoto son independientes. |
+| Pool | Conjunto de conexiones a PostgreSQL que la API reutiliza. |
+| Esquema | Grupo de tablas de una base PostgreSQL. «Preparar el esquema» se refiere también a crear o actualizar su estructura. |
 
 ## 3. Estructura del repositorio
 
@@ -104,7 +122,7 @@ Los archivos `__init__.py` delimitan paquetes. Pueden estar vacíos. El nombre `
 
 El servidor entrega un token aleatorio opaco, no JWT. PostgreSQL conserva su hash, el usuario y la caducidad de 30 minutos. Cada operación protegida comprueba token, usuario activo, cambio obligatorio y rol. El DNI recibido al iniciar sesión se normaliza; la contraseña distingue mayúsculas y minúsculas.
 
-Las funciones administrativas usan `admin_user`; las clínicas usan `ready_user`. La comprobación del rol no depende de que un botón esté visible. Las cuentas nuevas utilizan su DNI como usuario y una contraseña temporal única. El rol se calcula en el servidor a partir de la profesión.
+Las funciones administrativas usan `admin_user`; las asistenciales usan `care_user`, y la generación de IA exige `medical_user`. Todas parten de la comprobación de sesión de `ready_user`. La autorización se aplica en la API, aunque la interfaz ya oculte las opciones que no corresponden al perfil. Las cuentas nuevas utilizan su DNI como usuario y una contraseña temporal única. El rol se calcula en el servidor a partir de la profesión.
 
 ### 4.2. Escritura de solicitudes y asignaciones
 
@@ -181,6 +199,18 @@ El profesional contrasta el resultado con las notas originales y comprueba si fa
 
 El texto se muestra en la sesión de Streamlit como borrador pendiente de revisión. La descarga JSON está disponible en la demostración. La auditoría registra la generación, el profesional, el modelo, la versión de las instrucciones y las huellas de entrada y salida. En modo clínico registra también la versión del protocolo. La incorporación del contenido revisado a la historia corresponde al profesional.
 
+### 4.5. Baja temporal y reasignación de tratamientos
+
+En **Ajustes → Baja temporal de clínicos**, el administrador puede marcar una cuenta de rol CLINICO como de baja o reincorporarla. Es una ausencia temporal: conserva el acceso, el DNI, la contraseña y el historial, pero mientras esté de baja no puede asignarse nuevos pacientes. La columna `users.on_leave` se añade automáticamente al reiniciar la API.
+
+Los tratamientos activos del clínico de baja aparecen en **Reasignar tratamientos por baja**, con búsqueda por NHC y paginación. El administrador elige un tratamiento y un sustituto activo, disponible, de la misma profesión y con la contraseña inicial cambiada. Debe comprobar que puede atender la especialidad, el área y el horario: el catálogo de profesiones no acredita esas competencias ni calcula su capacidad asistencial. Si no hay sustituto, el tratamiento sigue activo y pendiente, sin crear una solicitud nueva ni borrar sesiones.
+
+La reasignación cambia únicamente el DNI, nombre y profesión del responsable del tratamiento. Conserva su identificador, solicitud de origen, fechas iniciales, horario, transporte, metas e informes. El autor de las sesiones anteriores permanece intacto. Reincorporar al clínico no devuelve automáticamente los pacientes ya reasignados.
+
+Las rutas PUT `/admin/users/{id}/leave` y POST `/admin/treatments/{id}/reassign` exigen rol ADMIN. Se bloquean las filas durante las operaciones y se comprueba que el tratamiento no haya cambiado desde que se seleccionó. Un clínico de baja no puede eludir la restricción llamando directamente a la asignación de la API. El cambio de responsable y su auditoría se guardan juntos; si falla la auditoría, se revierte la reasignación.
+
+La auditoría registra `BAJA_CLINICO`, `REINCORPORACION_CLINICO` y `REASIGNACION_TRATAMIENTO`. El último incluye NHC, tratamiento, especialidad, clínico anterior, nuevo clínico, administrador y fecha. La baja no altera los permisos exclusivos del rol Médico para los resúmenes de IA.
+
 ## 5. Persistencia y rendimiento
 
 | Tabla | Contenido |
@@ -193,7 +223,8 @@ El texto se muestra en la sesión de Streamlit como borrador pendiente de revisi
 | `treatment_sessions` | Sesiones, faltas y observaciones. |
 | `patient_ai_consent` | Decisión vigente registrada para IA. |
 | `assignment_log` | Eventos de auditoría. |
-| `clinical_visit_log` | Acceso diario de clínicos a historias. |
+| `clinical_visit_log` | Consulta diaria de historias por clínicos y médicos. |
+| `security_access_log` | Accesos individuales y rechazos, con fecha y hora, sin notas clínicas. |
 | `api_sessions`, `api_login_limits` | Sesiones y control de intentos de acceso. |
 
 Los índices de inicialización apoyan filtros de pendientes, estados, NHC y búsqueda de sesiones por tratamiento. El pool de cada proceso API se configura con mínimo 1, máximo 5 conexiones y espera de 20 segundos. Ese máximo no equivale al número máximo de usuarios; las peticiones se turnan y un proceso adicional tendría su propio pool.
@@ -241,6 +272,47 @@ Descargar el repositorio no proporciona una base ni acceso a la base del autor. 
 
 Si se utiliza una base existente, realiza una copia de seguridad y verifica el destino antes de inicializar. No se debe usar la base asistencial de un centro para las pruebas del TFG.
 
+Elige una de estas dos ubicaciones; no tienes que instalar ambas:
+
+- **Supabase:** sigue los apartados 6.2.1 a 6.2.3.
+- **PostgreSQL local:** instala el servidor desde la [página oficial para Windows](https://www.postgresql.org/download/windows/), conserva sus credenciales y crea una base vacía, por ejemplo `rehabilitacion_pruebas`. En pgAdmin puedes hacerlo desde **Databases → Create → Database** del servidor local. La cuenta de conexión necesita permisos para crear y modificar las tablas de esa base. Continúa en el apartado 6.3 con una URI como `postgresql://USUARIO:CONTRASENA_CODIFICADA@127.0.0.1:5432/rehabilitacion_pruebas`, sustituyendo usuario, contraseña y puerto. Esta alternativa no requiere una cuenta de Supabase.
+
+#### 6.2.1. Crear la base en Supabase
+
+La aplicación necesita una **base de datos relacional PostgreSQL**. Al crear un proyecto en Supabase se proporciona una base de ese tipo; no tienes que elegir MySQL ni una base NoSQL. Tampoco necesitas crear las tablas ni sus relaciones desde el panel: las prepara `api.init_db` con la estructura definida en el código.
+
+1. Entra en el [panel de Supabase](https://supabase.com/dashboard) y selecciona **New project**.
+2. Elige la organización y un nombre para el proyecto, por ejemplo, `rehabilitacion-pruebas`.
+3. Define una contraseña privada para la base y consérvala. Es distinta de la contraseña de tu cuenta de Supabase y de `ADMIN_INITIAL_PASSWORD`, que utilizarás para el administrador de la aplicación.
+4. Selecciona la región donde se alojará la base y revisa el plan antes de confirmar. Para esta preparación utiliza únicamente datos ficticios; la ubicación de una base asistencial debe decidirla el centro.
+5. Crea el proyecto y espera a que la base esté disponible. Puedes utilizar la base `postgres` que incluye el proyecto, sin crear otra base adicional.
+
+Supabase proporciona el servicio PostgreSQL, pero no configura por sí solo los permisos y procedimientos que requiere el uso asistencial de esta aplicación. Consulta su [documentación de base de datos](https://supabase.com/docs/guides/database).
+
+#### 6.2.2. Elegir la conexión
+
+Dentro del proyecto, abre **Connect** y copia la cadena en formato **URI**, que comienza por `postgresql://`. La API de esta aplicación se conecta mediante Psycopg, no mediante las claves `anon`, `publishable` o `service_role` de Supabase.
+
+| Opción | Cuándo utilizarla |
+|---|---|
+| **Direct connection**, puerto `5432` | Conexión directa para el servidor, si su red puede alcanzar esa dirección. Sin un complemento IPv4, normalmente requiere IPv6. |
+| **Session pooler**, puerto `5432` | Alternativa para un servidor conectado a una red que solo disponga de IPv4. Es la opción a utilizar si la conexión directa no es accesible desde esa red. |
+| **Transaction pooler**, normalmente puerto `6543` | No es la opción descrita en este manual. Sus condiciones de sesión y sentencias preparadas requieren revisar la compatibilidad antes de usarlo con esta instalación. |
+
+Para un equipo Windows en una red solo IPv4, selecciona **Session pooler**. Conserva exactamente el usuario y el servidor que muestre el panel: el usuario del pooler suele tener el formato `postgres.REFERENCIA_DEL_PROYECTO`. No cambies únicamente el puerto de una cadena para convertirla en otra. Estas opciones se describen en [Conexión a PostgreSQL de Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres).
+
+Sustituye el marcador de contraseña de la URI por la contraseña de la **base de datos**. Si contiene caracteres reservados, como `@`, `:` o `/`, codifica esa parte como componente de URI. Guarda la cadena completa en `DATABASE_URL`, dentro de `configuracion/.env.api`, como se explica en el apartado 6.3. No utilices la URL HTTPS del proyecto como cadena de PostgreSQL ni copies esta credencial a los puestos de usuario.
+
+#### 6.2.3. Proteger la conexión y preparar las tablas
+
+Esta aplicación utiliza su propia API FastAPI para controlar el acceso. En un proyecto dedicado a ella, desactiva **Enable Data API** en la configuración de Data API de Supabase antes de crear las tablas. Así no se ofrecen también mediante los endpoints REST generados por Supabase. Esto no desactiva la conexión PostgreSQL de Psycopg. Si compartes el proyecto con otra aplicación que use esa Data API, revisa sus permisos antes de cambiarla. Véase [Seguridad de la Data API](https://supabase.com/docs/guides/api/securing-your-api).
+
+La conexión remota de esta app verifica el certificado y el nombre del servidor mediante `sslmode=verify-full`. Contrasta el certificado público de `recursos/supabase_ca.crt` con el que facilite el panel del proyecto antes de conectar. Si el proveedor ha cambiado de CA, actualiza el archivo o configura `DATABASE_SSLROOTCERT` con la ruta al certificado correcto. No desactives la verificación para resolver un fallo de conexión. El apartado 9.3 detalla esta configuración; Supabase documenta sus opciones en [SSL de PostgreSQL](https://supabase.com/docs/guides/platform/ssl-enforcement).
+
+Después completa los apartados 6.3 y 6.4 y ejecuta la inicialización del apartado 6.5. El usuario de conexión necesita permisos para crear y actualizar las tablas. En una instalación nueva, el mensaje `Tablas preparadas. No se han insertado pacientes de prueba.` confirma que terminó la preparación. En el panel puedes comprobar las tablas del esquema `public`, como `waitlist`, `rehab_active`, `treatment_sessions` y `users`. Esta última contiene las cuentas de la aplicación; no son usuarios de Supabase Auth.
+
+Si aparece `tenant/user not found`, revisa que el proyecto esté activo y vuelve a copiar la cadena desde **Connect**, conservando su usuario completo. Si no se alcanza el servidor de la conexión directa desde una red IPv4, utiliza la cadena de **Session pooler**. Una respuesta correcta de `/health` solo confirma que la API responde; prueba también el inicio de sesión de la aplicación para comprobar la conexión con la base.
+
 ### 6.3. Configuración privada del servidor
 
 ```powershell
@@ -248,7 +320,7 @@ New-Item -ItemType Directory -Path configuracion -Force
 notepad .\configuracion\.env.api
 ```
 
-Guarda una configuración como la siguiente, sustituyendo los marcadores:
+Guarda el archivo con el nombre exacto `.env.api`, sin añadir `.txt`. En el Bloc de notas, selecciona **Todos los archivos** al guardar. Sustituye los marcadores del ejemplo por los valores de tu instalación:
 
 ```ini
 DATABASE_URL="postgresql://USUARIO:CONTRASENA@SERVIDOR:5432/BASE"
@@ -267,6 +339,8 @@ El administrador inicial solo se crea si no existe. Sus credenciales para el pri
 
 La aplicación obliga a cambiar esa contraseña en el primer acceso. Cambiar después `ADMIN_INITIAL_PASSWORD` no modifica la contraseña de un administrador ya registrado. El archivo `.env.api` está excluido de Git y no debe compartirse con los usuarios.
 
+`DATABASE_URL` conecta la API con PostgreSQL; `API_BASE_URL`, del siguiente apartado, conecta Streamlit con la API. Son direcciones distintas. Tampoco deben confundirse la contraseña de PostgreSQL, la contraseña inicial de `admin` y las contraseñas personales de los profesionales.
+
 ### 6.4. Configurar Streamlit
 
 ```powershell
@@ -274,7 +348,7 @@ New-Item -ItemType Directory -Path .streamlit -Force
 notepad .\.streamlit\secrets.toml
 ```
 
-Contenido:
+Guarda el archivo como `secrets.toml`, sin `.txt`, con este contenido:
 
 ```toml
 API_BASE_URL = "http://127.0.0.1:8000"
@@ -306,19 +380,13 @@ En Windows ARM debe obtenerse el ejecutable correspondiente a esa arquitectura, 
 
 Consulta `ipconfig` y localiza la IPv4 de la conexión activa. El cable y la wifi pueden tener direcciones diferentes. Para una instalación estable es preferible reservar la dirección del servidor en la configuración de la red.
 
-Edita `configuracion/Caddyfile` y sustituye la IP del ejemplo por la del servidor:
+Edita `configuracion/Caddyfile` y cambia únicamente la dirección de red de la línea que comienza así:
 
-```caddyfile
-{
-    skip_install_trust
-    auto_https disable_redirects
-}
-
+```text
 https://192.168.1.115, https://localhost {
-    tls internal
-    reverse_proxy 127.0.0.1:8501
-}
 ```
+
+Sustituye `192.168.1.115` por la IPv4 actual del servidor. Conserva `https://localhost` y el resto del archivo, incluidas las cabeceras de seguridad, la configuración de caché y `reverse_proxy 127.0.0.1:8501`. La línea anterior sirve para localizar el cambio; no es un Caddyfile completo.
 
 `tls internal` utiliza la autoridad local de Caddy. `skip_install_trust` deja la instalación de confianza como paso explícito. La redirección automática desde HTTP está desactivada: debe abrirse una URL que empiece por `https://`.
 
@@ -326,7 +394,7 @@ No es necesario publicar puertos en el router para trabajar dentro de la misma r
 
 ### 6.8. Primer arranque manual
 
-Abre tres terminales de PowerShell. En todas entra primero en la carpeta principal del proyecto.
+Abre tres terminales de PowerShell y entra en la raíz del proyecto en cada una. Cada comando de arranque ocupa su terminal: déjala abierta mientras utilices ese servicio. No uses a la vez el acceso directo del servidor. Tras esta comprobación inicial puedes cerrar los servicios con Ctrl+C y utilizar los accesos del apartado 8.
 
 **Terminal 1: API**
 
@@ -363,6 +431,8 @@ certutil -user -addstore Root ".\recursos\certificado_https_local.crt"
 
 La exportación copia el certificado público y muestra su SHA-256 para poder comprobar que se distribuye el correcto. El segundo comando instala la confianza para el usuario de Windows que lo ejecuta. Cierra completamente el navegador y vuelve a abrirlo. Prueba `https://localhost`.
 
+SHA-256 es un código calculado a partir del archivo. Para revisar una copia recibida, ejecuta `Get-FileHash -Algorithm SHA256` seguido de la ruta al certificado y compara el resultado con el del servidor por un canal de confianza. No es una contraseña.
+
 Distribuye únicamente `recursos/certificado_https_local.crt`. No distribuyas `datos/https`, `root.key` ni otras claves privadas. Si se conserva la misma autoridad, cambiar la IP y reemitir su certificado de servidor no exige reinstalar la raíz. Si se pierde o sustituye la autoridad, habrá que renovar la confianza de los puestos.
 
 ### 6.10. Cortafuegos
@@ -375,11 +445,13 @@ Abre **PowerShell como administrador** y permite TCP 443 desde la misma subred:
 New-NetFirewallRule -DisplayName "Rehabilitacion HTTPS local" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 443 -Profile Private -RemoteAddress LocalSubnet
 ```
 
-No es necesario abrir 8000 ni 8501 a los demás equipos para esta arquitectura. Si los usuarios están en otra subred autorizada, la regla `LocalSubnet` puede no cubrirlos; debe adaptarla informática. No desactives el cortafuegos para resolverlo.
+Los demás equipos solo necesitan llegar al puerto 443 de Caddy; no abras 8000 ni 8501 a la red. La regla del ejemplo permite el acceso desde la subred local cuando la conexión tiene perfil Privado. Si el centro utiliza otro perfil o los puestos están en otra subred, el responsable de red debe adaptar la regla.
+
+«Acceso denegado» al crearla suele indicar que PowerShell no se ha abierto como administrador. No desactives el cortafuegos. Antes de probar desde otro puesto, verifica que `https://localhost` funcione en el servidor y utiliza después su IP actual desde el otro equipo.
 
 ### 6.11. Ollama, opcional para la generación
 
-Instala Ollama en el servidor y abre una terminal nueva para actualizar su PATH. Después:
+Instala Ollama en el servidor desde su [descarga oficial para Windows](https://ollama.com/download/windows). Cierra la terminal anterior y abre una nueva para que reconozca el comando instalado. Ollama no se instala dentro del entorno virtual de Python. Después:
 
 ```powershell
 ollama --version
@@ -391,24 +463,60 @@ Abre Ollama desde Inicio. Si no hay un servidor ejecutándose, utiliza `ollama s
 
 El modelo requiere espacio de disco y memoria. Su velocidad depende del procesador, memoria y GPU; no se establece aquí un rendimiento mínimo garantizado. No se descarga ni se ejecuta automáticamente desde el acceso del servidor.
 
+Si `ollama` no se reconoce, comprueba que has ejecutado el instalador y abre una terminal nueva. Para comprobar si el servidor local responde, ejecuta en PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags"
+```
+
+Debe aparecer el listado de modelos instalados. `/api/chat`, en cambio, recibe peticiones POST con datos: abrir esa ruta en el navegador no prueba la generación. Si no necesitas IA, configura `AI_USE_MODE=disabled` en `.env.api`; puedes mantener la gestión y el seguimiento.
+
 ### 6.12. Habilitar el modo clínico
 
 1. **Completa la revisión del centro.** Verifica los requisitos del apartado 9.1 y registra la referencia de la versión del protocolo aprobado. La implementación actual utiliza consentimiento explícito documentado. Si el centro determina otra base para el tratamiento, el flujo de registro debe adaptarse a esa decisión antes del despliegue.
 2. **Configura Ollama en el servidor.** Mantén el servicio en la dirección local e instala el modelo `qwen2.5:7b-instruct`, que es el admitido en el modo clínico actual. Configura `OLLAMA_NO_CLOUD=1` en el entorno del proceso de Ollama. En Windows puedes usar una variable de usuario de la cuenta que ejecuta Ollama. Ciérralo por completo, vuelve a abrirlo y verifica en su registro `Ollama cloud disabled: true`. [Documentación de Ollama](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
+
+   Para establecer la variable de usuario desde PowerShell, con la misma cuenta de Windows que ejecuta Ollama:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("OLLAMA_NO_CLOUD", "1", "User")
+   ```
+
+   Sal por completo de Ollama desde su icono de la bandeja y vuelve a abrirlo desde Inicio. En la instalación habitual de Windows puedes comprobar su registro con:
+
+   ```powershell
+   Get-Content "$env:LOCALAPPDATA\Ollama\server.log" -Tail 100 |
+       Select-String "Ollama cloud disabled"
+   ```
+
+   Debe constar `Ollama cloud disabled: true`. Si no aparece, revisa la configuración y el registro del proceso utilizado antes de continuar. No basta con escribir la variable en `.env.api`: ese archivo configura la API, no un Ollama que ya esté abierto. [Configuración y registros de Ollama en Windows](https://docs.ollama.com/windows).
+
 3. **Configura la API.** En `configuracion/.env.api`, sustituye `AI_USE_MODE=demo` y añade los valores siguientes. Reemplaza el ejemplo de protocolo por la referencia real. Usa un código de hasta 80 caracteres con el formato indicado en el apartado 4.4. Marca `AI_LOCAL_ONLY_CONFIRMED=true` tras verificar el paso 2. Esta variable registra la comprobación realizada por el operador.
 
-```ini
-AI_USE_MODE=clinical
-AI_CLINICAL_PROTOCOL=PROTOCOLO-IA-REHAB-v1
-AI_LOCAL_ONLY_CONFIRMED=true
-OLLAMA_URL=http://127.0.0.1:11434/api/chat
-OLLAMA_MODEL=qwen2.5:7b-instruct
-```
+   ```ini
+   AI_USE_MODE=clinical
+   AI_CLINICAL_PROTOCOL=PROTOCOLO-IA-REHAB-v1
+   AI_LOCAL_ONLY_CONFIRMED=true
+   OLLAMA_URL=http://127.0.0.1:11434/api/chat
+   OLLAMA_MODEL=qwen2.5:7b-instruct
+   ```
 
 4. **Reinicia la API y Streamlit.** Con una cuenta Médico rehabilitador (rol MEDICO), comprueba que puede registrar el consentimiento documentado y generar el resumen de un tratamiento activo aunque esté asignado a otro profesional. Comprueba que los roles CLINICO y ADMIN reciben un rechazo al solicitar el resumen, y que la ausencia o retirada de consentimiento y la revocación de la cuenta médica bloquean la entrega.
 5. **Controla la puesta en marcha.** Verifica que el entorno asistencial usa la base, las cuentas y los certificados aprobados por el centro. Si necesitas suspender la función, configura `AI_USE_MODE=disabled` y reinicia la API y Streamlit. Reserva el modo `demo` para el entorno con datos ficticios.
 
 La API espera 480 segundos a Ollama de forma predeterminada. El cliente espera 540 segundos a la API. El error HTTP 504 identifica el agotamiento del tiempo de espera de Ollama.
+
+### 6.13. Primer acceso y comprobación de la instalación
+
+Cuando `https://localhost` funcione en el servidor:
+
+1. Entra con el usuario **`admin`** y la contraseña elegida en `ADMIN_INITIAL_PASSWORD`. Cambia la contraseña temporal cuando se solicite.
+2. En **Ajustes → Registrar nuevo usuario**, crea las cuentas con nombre, DNI y profesión. El DNI será su usuario. La profesión determina el rol: Administrador → ADMIN, Médico rehabilitador → MEDICO y el resto → CLINICO.
+3. Al crear o restablecer una cuenta, la aplicación muestra una contraseña temporal única. Entrégala por un canal privado y comprueba que el usuario la cambie en el primer acceso. Para probar IA necesitas una cuenta de Médico rehabilitador; `admin` no puede generar resúmenes.
+4. Con una cuenta asistencial y datos ficticios, crea una solicitud, asígnala, guarda una sesión y consulta el seguimiento. Comprueba que las operaciones aparecen en la auditoría correspondiente al perfil.
+5. Prueba el acceso desde otro puesto mediante `https://IP_DEL_SERVIDOR`, siguiendo el apartado 7. Instalar el certificado no sustituye la conexión de red ni el arranque de los servicios.
+
+Estas comprobaciones revisan el funcionamiento de la instalación. No constituyen una validación clínica ni autorizan a introducir datos reales; para ello deben cumplirse los requisitos del apartado 9.
 
 ## 7. Preparar un puesto de usuario
 
@@ -423,7 +531,7 @@ certutil -user -addstore Root "F:\Downloads\certificado_https_local.crt"
 4. Reinicia el navegador y abre `https://IP_DEL_SERVIDOR`.
 5. Recibe una cuenta y contraseña temporal del administrador.
 
-No uses `https://localhost` en ese puesto: apuntaría al propio puesto. No necesita repositorio, entorno virtual ni credenciales de PostgreSQL.
+No uses `https://localhost` en ese puesto: apuntaría al propio puesto. No necesita repositorio, entorno virtual ni credenciales de PostgreSQL. Puedes entregarle el archivo `Rehabilitacion - Usuario.url` generado en el apartado 8. No debe ejecutar `IniciarServidor.vbs`: los servicios ya se ejecutan en el equipo servidor.
 
 ## 8. Accesos directos y operación diaria
 
@@ -489,6 +597,30 @@ La autorización del hospital no sustituye la evaluación regulatoria ni los req
 
 Antes de un uso asistencial, deben delimitarse las funciones y documentarse la decisión regulatoria; la AEMPS publica un procedimiento específico de consulta. La configuración `AI_USE_MODE=clinical` únicamente habilita controles técnicos y no equivale a una autorización legal. [Consulta de cualificación y clasificación](https://www.aemps.gob.es/productos-sanitarios/consultas-relativas-a-la-cualificacion-y-clasificacion-de-productos-sanitarios-y-productos-sanitarios-de-diagnostico-in-vitro/)
 
+### 9.3. Permisos asistenciales y protección de las comunicaciones
+
+| Rol | Acceso asistencial | Administración |
+|---|---|---|
+| CLINICO | Tratamientos actualmente asignados a su DNI, incluidas sus sesiones e historial. Registra sesiones y altas. Los listados y la auditoría se filtran por esa asignación. | Sin gestión de usuarios ni catálogos. |
+| MEDICO | Puede consultar los tratamientos de todos los pacientes. Es el único que genera resúmenes de IA, con los controles de consentimiento y modo correspondientes. | No dispone de funciones administrativas. |
+| ADMIN | Gestiona solicitudes, usuarios, catálogos, bajas y reasignaciones. No recibe notas clínicas, informes de seguimiento, resúmenes de IA ni comentarios y motivos libres de la auditoría clínica. | Consulta los registros de visitas y de seguridad. |
+
+La lista de espera y los contadores generales de actividad conservan su finalidad operativa. Los indicadores clínicos globales del Dashboard se reservan al médico. La interfaz adapta sus opciones, pero la protección se aplica también cuando se llama directamente a la API. Al cambiar de identidad o de rol se elimina el estado temporal; un rechazo de acceso invalida la caché de la petición y los resultados temporales de IA.
+
+Las consultas individuales se registran en `security_access_log` con DNI, operación, resultado, tratamiento, NHC y fecha con hora. `clinical_visit_log` mantiene además el registro de una visita por DNI, NHC y día. Los rechazos de acceso se registran con una conexión independiente para conservarlos aunque se revierta la operación. No se guardan contraseñas, tokens ni notas en ese registro; las rutas se identifican por su plantilla, sin copiar parámetros libres. Si falla la auditoría de una lectura clínica, la API no entrega los datos. Si falla el registro de un rechazo, mantiene el rechazo y deja un aviso técnico sin información clínica. Son registros de aplicación, no un almacén inmutable frente al propietario de PostgreSQL. El centro debe proteger sus permisos y definir conservación y revisión.
+
+El nuevo registro está en **Registro de visitas → Accesos y rechazos de la API**. Las búsquedas y la paginación no descargan toda la tabla. Los rechazos pueden carecer de NHC cuando la cuenta no estaba autorizada para conocerlo; para verlos, deje vacío ese filtro.
+
+`get_database_url()` aplica verificación TLS a las conexiones que no son de loopback o socket local. Para Supabase se incluye su CA pública en `recursos/supabase_ca.crt`. Se obtuvo del repositorio de descargas HTTPS del proveedor: `https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt`. Su SHA-256 es `700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7`. El certificado es público y no contiene claves privadas. Antes de una instalación, contraste la CA con la que facilita el panel del proyecto. Si el proveedor cambia el certificado raíz, actualice la copia desde una fuente oficial.
+
+Para otra autoridad certificadora, configure `DATABASE_SSLROOTCERT` con la ruta absoluta a su certificado PEM, o indique `sslrootcert` en la conexión. Para otros servidores remotos se usa por defecto el almacén de confianza `system` de libpq. Un fallo de verificación impide conectar: no se reduce automáticamente a `require` ni se desactiva la comprobación. Para PostgreSQL exclusivamente local se mantiene la configuración explícita del administrador.
+
+Caddy conserva HTTPS con la autoridad local e incorpora protección frente a inclusión en marcos, detección de tipos de contenido y envío de referencias. Las respuestas dinámicas llevan `Cache-Control: no-store`; los archivos estáticos mantienen su caché. La API también marca sus respuestas como no almacenables. El arranque conserva API y Streamlit en `127.0.0.1` y activa expresamente los controles CORS y XSRF de Streamlit. No se expone la API a otros equipos ni se cambia la autoridad de certificados ya instalada.
+
+Al reiniciar la API se crea la tabla de seguridad. La auditoría general admite NHC vacío para las bajas y reincorporaciones del personal, que no pertenecen a un paciente concreto; las operaciones asistenciales siguen registrando su NHC. Reinicie API, Streamlit y Caddy tras actualizar. Las pruebas verifican estos comportamientos, pero no sustituyen una auditoría independiente, el análisis de riesgos del centro ni la evaluación regulatoria del módulo clínico.
+
+Referencias técnicas: [TLS de PostgreSQL](https://www.postgresql.org/docs/current/libpq-ssl.html), [SSL de Supabase](https://supabase.com/docs/guides/platform/ssl-enforcement) y [cabeceras de Caddy](https://caddyserver.com/docs/caddyfile/directives/header).
+
 ## 10. Rutas principales para mantenimiento
 
 | Grupo | Rutas representativas |
@@ -512,11 +644,24 @@ Ejemplo de consulta paginada: `/tables/audit?page=2&page_size=50&patient_id=0000
 
 Antes de actualizar, conserva una copia del código que funciona y una copia de los datos. No sobrescribas secretos ni claves al descargar una versión nueva. Actualiza las dependencias cuando cambien los requirements. Si cambia el esquema, ejecuta la inicialización prevista sin usuarios trabajando y tras comprobar el destino; no existe un historial de migraciones gestionado por una herramienta dedicada.
 
-Después de actualizar, comprueba manualmente con casos ficticios el recorrido de acceso, cambio de contraseña, solicitud, asignación, sesión, seguimiento, alta y auditoría. Verifica que las funciones administrativas solo estén disponibles para el rol autorizado y que desactivar un tratamiento conserve sus sesiones.
+Tras actualizar, reinicia los procesos para cargar el código nuevo. Si usas los accesos, detén e inicia desde ellos; si arrancaste manualmente, utiliza Ctrl+C y repite el apartado 6.8. Cambiar `.env.api` con la API abierta no actualiza sus variables. Después comprueba con casos ficticios el recorrido de acceso, cambio de contraseña, solicitud, asignación, sesión, seguimiento, alta y auditoría. Verifica que las funciones administrativas solo estén disponibles para el rol autorizado y que desactivar un tratamiento conserve sus sesiones.
 
 En los listados paginados, comprueba Anterior/Siguiente, los tres tamaños y el reinicio de página al cambiar los filtros. Recorre un conjunto estable para confirmar que sus registros sean accesibles sin repeticiones ni omisiones. Verifica también que los informes e indicadores no cambien al pasar de página.
 
 Comprueba también el arranque y la parada desde los accesos del servidor. Antes de detenerlo, avisa a los usuarios conectados. Desde otro equipo, verifica la confianza HTTPS y el acceso mediante la URL de red. Para comprobar la generación con IA, utiliza únicamente casos ficticios con aceptación registrada y revisa la respuesta frente a los informes originales.
+
+### 11.1. Qué conservar y cómo comprobar una copia
+
+La aplicación no instala un sistema automático de copias de seguridad. El responsable técnico debe preparar y comprobar este procedimiento antes de depender de los datos guardados.
+
+| Elemento | Qué debe conservarse |
+|---|---|
+| Base PostgreSQL | Copia de los datos y de la estructura mediante las herramientas del proveedor o un procedimiento PostgreSQL. Copiar `DATABASE_URL` no copia la base. |
+| Versión de la aplicación | Código de la versión que funciona y sus archivos de dependencias. |
+| Configuración privada | `.env.api` y `secrets.toml`, con acceso restringido y fuera de Git. |
+| HTTPS local | `configuracion/Caddyfile` y el estado privado de Caddy en `datos/https` y `datos/https-config`, protegido como material sensible. Copiar solo el `.crt` público no permite recuperar la misma autoridad. |
+
+Antes de actualizar, evita nuevas escrituras, conserva estas copias y anota la versión utilizada. Comprueba la restauración en un entorno separado, sin sobrescribir la base de trabajo: revisa cuentas, solicitudes, sesiones y auditoría. Reinicia los servicios con esa configuración de prueba y verifica un recorrido ficticio. El responsable del centro debe fijar la frecuencia, el lugar protegido de almacenamiento y quién puede restaurar las copias. Las claves privadas se conservan únicamente en esa copia protegida, nunca en el paquete de usuario.
 
 ## 12. Diagnóstico de incidencias
 
@@ -527,6 +672,10 @@ Comprueba también el arranque y la parada desde los accesos del servidor. Antes
 | `getaddrinfo failed` al arrancar Streamlit | `--server.address` debe contener solo una dirección válida, sin protocolo ni puerto. |
 | DATABASE_URL ausente | Revisa el archivo privado y el argumento `--env-file configuracion/.env.api`. |
 | Fallo de contraseña PostgreSQL | Revisa usuario y credenciales de la base, no la contraseña del clínico. |
+| `tenant/user not found` en Supabase | Comprueba el estado del proyecto y vuelve a copiar la cadena desde Connect, conservando el usuario completo. |
+| Fallo de verificación TLS de PostgreSQL | Revisa la CA, su ruta y el nombre del servidor según el apartado 9.3; no desactives la verificación. |
+| `ollama` no se reconoce | Comprueba la instalación y abre una terminal nueva. Véase el apartado 6.11. |
+| El administrador no puede generar IA | Es el comportamiento previsto. Utiliza una cuenta Médico rehabilitador y comprueba el modo y el consentimiento. |
 | API responde, pero falla una consulta | `/health` no ejecuta una comprobación completa de base de datos. Revisa logs y conectividad. |
 | Puerto ocupado | Identifica el proceso que escucha antes de detener o reutilizarlo. |
 | `ERR_CERT_AUTHORITY_INVALID` | Instala el certificado de la autoridad actual para el usuario del navegador y reinícialo. |
@@ -534,6 +683,16 @@ Comprueba también el arranque y la parada desde los accesos del servidor. Antes
 | `ERR_CONNECTION_TIMED_OUT` | Revisa IP activa, cortafuegos, perfil Privado y comunicación entre subredes. |
 | IA no genera | Revisa Ollama, modelo, tamaño de entrada y modo configurado. En `demo`, comprueba la aceptación simulada y la confirmación ficticia. En ambos modos utiliza una cuenta de Médico rehabilitador con rol MEDICO. En `clinical`, verifica además el protocolo, la configuración local y el consentimiento vigente; no se exige asignación al tratamiento. |
 | IA devuelve 504 | Ollama agotó el tiempo de espera. Revisa la carga del servidor y vuelve a intentarlo con un conjunto de informes que se ajuste al contexto validado. |
+
+Para revisar los registros de un arranque mediante el acceso directo, ejecuta en el servidor:
+
+```powershell
+Get-Content .\logs\api.log -Tail 50
+Get-Content .\logs\streamlit.log -Tail 50
+Get-Content .\logs\caddy.log -Tail 50
+```
+
+Si el arranque fue manual, consulta la terminal del servicio. Revisa el error concreto sin compartir credenciales ni notas clínicas. Los avisos de PSReadLine corresponden a la terminal y no indican por sí solos un fallo de la aplicación.
 
 Desde el otro equipo, prueba TCP 443 en PowerShell:
 
@@ -576,41 +735,3 @@ Para los puestos de usuario de esta arquitectura basta con el enlace y el certif
 - La corrección de sesiones no tiene una interfaz general de edición y eliminación individual.
 - La coordinación entre tratamientos depende de los nombres concretos que reconoce `FISIO_ESPECIALIDADES`; ampliar un catálogo no amplía automáticamente esas reglas.
 - El traslado de la aplicación a un hospital requiere revisar permisos por paciente, infraestructura, bases jurídicas, conservación, seguridad y validación con los responsables correspondientes.
-
-
-### Baja temporal y reasignación de tratamientos
-
-En **Ajustes → Baja temporal de clínicos**, el administrador puede marcar una cuenta de rol CLINICO como de baja o reincorporarla. Es una ausencia temporal: conserva el acceso, el DNI, la contraseña y el historial, pero impide recibir nuevas asignaciones. La columna `users.on_leave` se añade automáticamente al reiniciar la API.
-
-Los tratamientos activos del clínico de baja aparecen en **Reasignar tratamientos por baja**, con búsqueda por NHC y paginación. El administrador elige un tratamiento y un sustituto activo, disponible, de la misma profesión y con la contraseña inicial cambiada. Debe comprobar que puede atender la especialidad, el área y el horario: el catálogo de profesiones no acredita esas competencias ni calcula su capacidad asistencial. Si no hay sustituto, el tratamiento sigue activo y pendiente, sin crear una solicitud nueva ni borrar sesiones.
-
-La reasignación cambia únicamente el DNI, nombre y profesión del responsable del tratamiento. Conserva su identificador, solicitud de origen, fechas iniciales, horario, transporte, metas e informes. El autor de las sesiones anteriores permanece intacto. Reincorporar al clínico no devuelve automáticamente los pacientes ya reasignados.
-
-Las rutas PUT `/admin/users/{id}/leave` y POST `/admin/treatments/{id}/reassign` exigen rol ADMIN. Se bloquean las filas durante las operaciones y se comprueba que el tratamiento no haya cambiado desde que se seleccionó. Un clínico de baja no puede eludir la restricción llamando directamente a la asignación de la API. El cambio de responsable y su auditoría se guardan juntos; si falla la auditoría, se revierte la reasignación.
-
-La auditoría registra `BAJA_CLINICO`, `REINCORPORACION_CLINICO` y `REASIGNACION_TRATAMIENTO`. El último incluye NHC, tratamiento, especialidad, clínico anterior, nuevo clínico, administrador y fecha. La baja no altera los permisos exclusivos del rol Médico para los resúmenes de IA.
-
-
-### Controles de acceso y transporte incorporados
-
-| Rol | Acceso asistencial | Administración |
-|---|---|---|
-| CLINICO | Tratamientos actualmente asignados a su DNI, incluidas sus sesiones e historial. Registra sesiones y altas. Los listados y la auditoría se filtran por esa asignación. | Sin gestión de usuarios ni catálogos. |
-| MEDICO | Puede consultar los tratamientos de todos los pacientes. Es el único que genera resúmenes de IA, con los controles de consentimiento y modo correspondientes. | No dispone de funciones administrativas. |
-| ADMIN | Gestiona solicitudes, usuarios, catálogos, bajas y reasignaciones. No recibe notas clínicas, informes de seguimiento, resúmenes de IA ni comentarios y motivos libres de la auditoría clínica. | Consulta los registros de visitas y de seguridad. |
-
-La lista de espera y los contadores generales de actividad conservan su finalidad operativa. Los indicadores clínicos globales del Dashboard se reservan al médico. La interfaz adapta sus opciones, pero la protección se aplica también cuando se llama directamente a la API. Al cambiar de identidad o de rol se elimina el estado temporal; un rechazo de acceso invalida la caché de la petición y los resultados temporales de IA.
-
-Las consultas individuales se registran en `security_access_log` con DNI, operación, resultado, tratamiento, NHC y fecha con hora. `clinical_visit_log` mantiene además el registro de una visita por DNI, NHC y día. Los rechazos de acceso se registran con una conexión independiente para conservarlos aunque se revierta la operación. No se guardan contraseñas, tokens ni notas en ese registro; las rutas se identifican por su plantilla, sin copiar parámetros libres. Si falla la auditoría de una lectura clínica, la API no entrega los datos. Si falla el registro de un rechazo, mantiene el rechazo y deja un aviso técnico sin información clínica. Son registros de aplicación, no un almacén inmutable frente al propietario de PostgreSQL. El centro debe proteger sus permisos y definir conservación y revisión.
-
-El nuevo registro está en **Registro de visitas → Accesos y rechazos de la API**. Las búsquedas y la paginación no descargan toda la tabla. Los rechazos pueden carecer de NHC cuando la cuenta no estaba autorizada para conocerlo; para verlos, deje vacío ese filtro.
-
-`get_database_url()` aplica verificación TLS a las conexiones que no son de loopback o socket local. Para Supabase se incluye su CA pública en `recursos/supabase_ca.crt`. Se obtuvo del repositorio de descargas HTTPS del proveedor: `https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt`. Su SHA-256 es `700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7`. El certificado es público y no contiene claves privadas. Antes de una instalación, contraste la CA con la que facilita el panel del proyecto. Si el proveedor cambia el certificado raíz, actualice la copia desde una fuente oficial.
-
-Para otra autoridad certificadora, configure `DATABASE_SSLROOTCERT` con la ruta absoluta a su certificado PEM, o indique `sslrootcert` en la conexión. Para otros servidores remotos se usa por defecto el almacén de confianza `system` de libpq. Un fallo de verificación impide conectar: no se reduce automáticamente a `require` ni se desactiva la comprobación. Para PostgreSQL exclusivamente local se mantiene la configuración explícita del administrador.
-
-Caddy conserva HTTPS con la autoridad local e incorpora protección frente a inclusión en marcos, detección de tipos de contenido y envío de referencias. Las respuestas dinámicas llevan `Cache-Control: no-store`; los archivos estáticos mantienen su caché. La API también marca sus respuestas como no almacenables. El arranque conserva API y Streamlit en `127.0.0.1` y activa expresamente los controles CORS y XSRF de Streamlit. No se expone la API a otros equipos ni se cambia la autoridad de certificados ya instalada.
-
-Al reiniciar la API se crea la tabla de seguridad. La auditoría general admite NHC vacío para las bajas y reincorporaciones del personal, que no pertenecen a un paciente concreto; las operaciones asistenciales siguen registrando su NHC. Reinicie API, Streamlit y Caddy tras actualizar. Las pruebas verifican estos comportamientos, pero no sustituyen una auditoría independiente, el análisis de riesgos del centro ni la evaluación regulatoria del módulo clínico.
-
-Referencias técnicas: [TLS de PostgreSQL](https://www.postgresql.org/docs/current/libpq-ssl.html), [SSL de Supabase](https://supabase.com/docs/guides/platform/ssl-enforcement) y [cabeceras de Caddy](https://caddyserver.com/docs/caddyfile/directives/header).

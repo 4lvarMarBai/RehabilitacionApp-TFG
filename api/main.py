@@ -220,7 +220,9 @@ def login(body: Login, request: Request, conn=Depends(get_conn)):
 
 @app.get("/bootstrap")
 def bootstrap(
-    include_stats: bool = True, user=Depends(current_user), conn=Depends(get_conn)
+    include_stats: bool = True,
+    area_specialty: str | None = Query(default=None, min_length=1, max_length=150),
+    user=Depends(current_user), conn=Depends(get_conn),
 ):
     # Una sola petición para autenticar y preparar la cabecera y los filtros.
     if user["must_change_password"]:
@@ -238,6 +240,17 @@ def bootstrap(
             "waiting": waiting,
             "active": active,
             "discharged": discharged,
+        }
+    if area_specialty and any(
+        name == area_specialty and requires_area and active
+        for name, requires_area, active in result["specialties"]
+    ):
+        # El filtro lateral usa estas áreas en todas las secciones.
+        result["areas"] = {
+            "specialty_name": area_specialty,
+            "rows": encode(cat.get_areas_por_especialidad(
+                conn, area_specialty, only_active=False,
+            )),
         }
     return result
 

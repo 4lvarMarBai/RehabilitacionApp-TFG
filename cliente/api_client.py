@@ -191,13 +191,17 @@ def authenticate_user(conn, username, password):
 
 
 def get_current_session_user():
+    params = {
+        "include_stats": st.session_state.get("nav_page", "📊 Panel de control")
+        == "📊 Panel de control"
+    }
+    specialty = st.session_state.get("sidebar_specialty_filter")
+    if specialty and specialty != "Todas":
+        params["area_specialty"] = specialty
     result = _request(
         "GET",
         "/bootstrap",
-        params={
-            "include_stats": st.session_state.get("nav_page", "📊 Panel de control")
-            == "📊 Panel de control"
-        },
+        params=params,
     )
     st.session_state["ai_use_mode"] = result.get("ai_use_mode", "demo")
     cache = st.session_state.setdefault("_api_run_cache", {})
@@ -213,6 +217,22 @@ def get_current_session_user():
                 json.dumps(params, sort_keys=True, default=_json_default),
             )
             cache[cache_key] = deepcopy(result[key])
+    areas = result.get("areas")
+    if areas:
+        # Solo durante esta ejecución y para la sesión autenticada actual.
+        for only_active in (False, True):
+            rows = areas["rows"]
+            cache_key = (
+                api_base_url(), st.session_state.get("access_token"),
+                "/catalog/areas",
+                json.dumps({
+                    "specialty_name": areas["specialty_name"],
+                    "only_active": only_active,
+                }, sort_keys=True),
+            )
+            cache[cache_key] = deepcopy(
+                [row for row in rows if row[1]] if only_active else rows
+            )
     return result["user"]
 
 

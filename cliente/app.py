@@ -1872,83 +1872,85 @@ elif page == "⚙️ Ajustes":
 
     st.markdown("### Corrección de errores de registro")
 
-    with st.expander("🚫 Eliminar solicitud de lista de espera"):
-        _, waitlist_rows = paginated_table(conn, "admin_waitlist", "admin_waitlist")
+    with st.expander('🚫 Eliminar solicitud de lista de espera', key='settings_delete_waitlist', on_change="rerun") as panel:
+        if panel.open:
+            _, waitlist_rows = paginated_table(conn, "admin_waitlist", "admin_waitlist")
 
-        if not waitlist_rows:
-            st.info("No hay solicitudes en lista de espera.")
-        else:
-            waitlist_options = {
-                f"{r[0]} · NHC {r[1]} · {specialty_label(r[2], r[3])} · {r[4]} · {str(r[5])[:10]}": r[
-                    0
-                ]
-                for r in waitlist_rows
-            }
+            if not waitlist_rows:
+                st.info("No hay solicitudes en lista de espera.")
+            else:
+                waitlist_options = {
+                    f"{r[0]} · NHC {r[1]} · {specialty_label(r[2], r[3])} · {r[4]} · {str(r[5])[:10]}": r[
+                        0
+                    ]
+                    for r in waitlist_rows
+                }
 
-            selected_waitlist = st.selectbox(
-                "Selecciona la solicitud a eliminar",
-                list(waitlist_options.keys()),
-                key="admin_delete_waitlist_pick",
-            )
+                selected_waitlist = st.selectbox(
+                    "Selecciona la solicitud a eliminar",
+                    list(waitlist_options.keys()),
+                    key="admin_delete_waitlist_pick",
+                )
 
-            confirm_delete_waitlist = st.checkbox(
-                "Confirmo que quiero eliminar esta solicitud",
-                key=f"admin_confirm_delete_waitlist_{waitlist_options[selected_waitlist]}",
-            )
+                confirm_delete_waitlist = st.checkbox(
+                    "Confirmo que quiero eliminar esta solicitud",
+                    key=f"admin_confirm_delete_waitlist_{waitlist_options[selected_waitlist]}",
+                )
 
-            if st.button("Eliminar solicitud", key="admin_delete_waitlist_button"):
-                if rol_usuario != "ADMIN":
-                    st.error("Solo el administrador puede eliminar solicitudes.")
-                elif not confirm_delete_waitlist:
-                    st.error("Debes confirmar la eliminación.")
-                else:
-                    ok, msg = delete_waitlist_entry(
-                        conn, waitlist_options[selected_waitlist], actor_sidebar
-                    )
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
+                if st.button("Eliminar solicitud", key="admin_delete_waitlist_button"):
+                    if rol_usuario != "ADMIN":
+                        st.error("Solo el administrador puede eliminar solicitudes.")
+                    elif not confirm_delete_waitlist:
+                        st.error("Debes confirmar la eliminación.")
                     else:
-                        st.error(msg)
+                        ok, msg = delete_waitlist_entry(
+                            conn, waitlist_options[selected_waitlist], actor_sidebar
+                        )
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
-    with st.expander("⛔ Desactivar tratamiento activo"):
-        _, active_rows = paginated_table(conn, "admin_active", "admin_active")
+    with st.expander('⛔ Desactivar tratamiento activo', key='settings_deactivate_treatment', on_change="rerun") as panel:
+        if panel.open:
+            _, active_rows = paginated_table(conn, "admin_active", "admin_active")
 
-        if not active_rows:
-            st.info("No hay tratamientos activos.")
-        else:
-            active_options = {
-                f"{r[0]} · NHC {r[1]} · {specialty_label(r[2], r[3])} · inicio {str(r[4])[:10]}": r[
-                    0
-                ]
-                for r in active_rows
-            }
+            if not active_rows:
+                st.info("No hay tratamientos activos.")
+            else:
+                active_options = {
+                    f"{r[0]} · NHC {r[1]} · {specialty_label(r[2], r[3])} · inicio {str(r[4])[:10]}": r[
+                        0
+                    ]
+                    for r in active_rows
+                }
 
-            selected_active = st.selectbox(
-                "Selecciona el tratamiento activo a desactivar",
-                list(active_options.keys()),
-                key="admin_delete_active_pick",
-            )
+                selected_active = st.selectbox(
+                    "Selecciona el tratamiento activo a desactivar",
+                    list(active_options.keys()),
+                    key="admin_delete_active_pick",
+                )
 
-            confirm_delete_active = st.checkbox(
-                "Confirmo que quiero desactivar este tratamiento conservando sus sesiones",
-                key=f"admin_confirm_delete_active_{active_options[selected_active]}",
-            )
+                confirm_delete_active = st.checkbox(
+                    "Confirmo que quiero desactivar este tratamiento conservando sus sesiones",
+                    key=f"admin_confirm_delete_active_{active_options[selected_active]}",
+                )
 
-            if st.button("Desactivar tratamiento", key="admin_delete_active_button"):
-                if rol_usuario != "ADMIN":
-                    st.error("Solo el administrador puede desactivar tratamientos.")
-                elif not confirm_delete_active:
-                    st.error("Debes confirmar la desactivación.")
-                else:
-                    ok, msg = delete_active_treatment(
-                        conn, active_options[selected_active], actor_sidebar
-                    )
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
+                if st.button("Desactivar tratamiento", key="admin_delete_active_button"):
+                    if rol_usuario != "ADMIN":
+                        st.error("Solo el administrador puede desactivar tratamientos.")
+                    elif not confirm_delete_active:
+                        st.error("Debes confirmar la desactivación.")
                     else:
-                        st.error(msg)
+                        ok, msg = delete_active_treatment(
+                            conn, active_options[selected_active], actor_sidebar
+                        )
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
     st.markdown("### Usuarios del sistema")
 
@@ -2069,156 +2071,163 @@ elif page == "⚙️ Ajustes":
         else:
             st.info("No hay tratamientos pendientes de reasignación con estos filtros.")
 
-    tab1, tab2, tab3 = st.tabs(["Especialidades", "Áreas", "Listado actual"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Especialidades", "Áreas", "Listado actual"],
+        key="settings_catalog_tabs", on_change="rerun",
+    )
 
-    with tab1:
-        st.markdown("### Añadir nueva especialidad")
-        n1, n2 = st.columns([2, 1])
-        with n1:
-            nueva_especialidad = st.text_input(
-                "Nombre de la especialidad",
-                placeholder="Ej: Rehabilitación vestibular",
-                key="cfg_new_specialty",
-            ).strip()
-        with n2:
-            requiere_area = st.checkbox(
-                "Requiere área", value=False, key="cfg_requires_subspecialty"
-            )
+    if tab1.open:
+        with tab1:
+            st.markdown("### Añadir nueva especialidad")
+            n1, n2 = st.columns([2, 1])
+            with n1:
+                nueva_especialidad = st.text_input(
+                    "Nombre de la especialidad",
+                    placeholder="Ej: Rehabilitación vestibular",
+                    key="cfg_new_specialty",
+                ).strip()
+            with n2:
+                requiere_area = st.checkbox(
+                    "Requiere área", value=False, key="cfg_requires_subspecialty"
+                )
 
-        if st.button("Guardar especialidad", key="cfg_save_specialty", width="stretch"):
-            if not nueva_especialidad:
-                st.error("Introduce el nombre de la especialidad.")
+            if st.button("Guardar especialidad", key="cfg_save_specialty", width="stretch"):
+                if not nueva_especialidad:
+                    st.error("Introduce el nombre de la especialidad.")
+                else:
+                    add_specialty_config(conn, nueva_especialidad, requiere_area)
+                    st.success("Especialidad guardada.")
+                    st.rerun()
+
+            st.markdown("### Activar o desactivar especialidades")
+            _, especialidades_todas = paginated_table(conn, "specialties", "manage_specialties")
+            if especialidades_todas:
+                for nombre, req_sub, active in especialidades_todas:
+                    c1, c2, c3 = st.columns([2.5, 1.2, 1])
+                    with c1:
+                        st.write(f"**{nombre}**")
+                    with c2:
+                        st.write("Con áreas" if req_sub else "Sin áreas")
+                    with c3:
+                        nuevo_estado = st.toggle(
+                            "Activa",
+                            value=active,
+                            key=f"toggle_specialty_{nombre}",
+                            label_visibility="collapsed",
+                        )
+                        if nuevo_estado != active:
+                            set_specialty_active(conn, nombre, nuevo_estado)
+                            st.rerun()
+
+    if tab2.open:
+        with tab2:
+            st.markdown("### Añadir nueva área")
+            especialidades_con_area = [
+                n for n, req, _ in get_especialidades(conn, only_active=False) if req
+            ]
+
+            if not especialidades_con_area:
+                st.info("No hay especialidades configuradas que requieran áreas.")
             else:
-                add_specialty_config(conn, nueva_especialidad, requiere_area)
-                st.success("Especialidad guardada.")
-                st.rerun()
-
-        st.markdown("### Activar o desactivar especialidades")
-        _, especialidades_todas = paginated_table(conn, "specialties", "manage_specialties")
-        if especialidades_todas:
-            for nombre, req_sub, active in especialidades_todas:
-                c1, c2, c3 = st.columns([2.5, 1.2, 1])
-                with c1:
-                    st.write(f"**{nombre}**")
-                with c2:
-                    st.write("Con áreas" if req_sub else "Sin áreas")
-                with c3:
-                    nuevo_estado = st.toggle(
-                        "Activa",
-                        value=active,
-                        key=f"toggle_specialty_{nombre}",
-                        label_visibility="collapsed",
+                a1, a2 = st.columns([1.5, 2])
+                with a1:
+                    especialidad_destino = st.selectbox(
+                        "Especialidad", especialidades_con_area, key="cfg_area_specialty"
                     )
-                    if nuevo_estado != active:
-                        set_specialty_active(conn, nombre, nuevo_estado)
+                with a2:
+                    nueva_area = st.text_input(
+                        "Nombre del área",
+                        placeholder="Ej: Dolor crónico",
+                        key="cfg_new_area",
+                    ).strip()
+
+                if st.button("Guardar área", key="cfg_save_area", width="stretch"):
+                    if not nueva_area:
+                        st.error("Introduce el nombre del área.")
+                    else:
+                        add_subspecialty_config(conn, especialidad_destino, nueva_area)
+                        st.success("Área guardada.")
                         st.rerun()
 
-    with tab2:
-        st.markdown("### Añadir nueva área")
-        especialidades_con_area = [
-            n for n, req, _ in get_especialidades(conn, only_active=False) if req
-        ]
+            st.markdown("### Activar o desactivar áreas")
 
-        if not especialidades_con_area:
-            st.info("No hay especialidades configuradas que requieran áreas.")
-        else:
-            a1, a2 = st.columns([1.5, 2])
-            with a1:
-                especialidad_destino = st.selectbox(
-                    "Especialidad", especialidades_con_area, key="cfg_area_specialty"
-                )
-            with a2:
-                nueva_area = st.text_input(
-                    "Nombre del área",
-                    placeholder="Ej: Dolor crónico",
-                    key="cfg_new_area",
-                ).strip()
+            _, areas_configuradas = paginated_table(conn, "areas", "manage_areas")
 
-            if st.button("Guardar área", key="cfg_save_area", width="stretch"):
-                if not nueva_area:
-                    st.error("Introduce el nombre del área.")
-                else:
-                    add_subspecialty_config(conn, especialidad_destino, nueva_area)
-                    st.success("Área guardada.")
-                    st.rerun()
+            for especialidad, area, activa in areas_configuradas:
+                col_nombre, col_estado = st.columns([3, 1])
 
-        st.markdown("### Activar o desactivar áreas")
+                with col_nombre:
+                    st.write(f"**{especialidad} — {area}**")
 
-        _, areas_configuradas = paginated_table(conn, "areas", "manage_areas")
-
-        for especialidad, area, activa in areas_configuradas:
-            col_nombre, col_estado = st.columns([3, 1])
-
-            with col_nombre:
-                st.write(f"**{especialidad} — {area}**")
-
-            with col_estado:
-                nuevo_estado = st.toggle(
-                    "Activa",
-                    value=activa,
-                    key=f"toggle_area_{especialidad}_{area}",
-                    label_visibility="collapsed",
-                )
-
-                if nuevo_estado != activa:
-                    set_subspecialty_active(
-                        conn,
-                        especialidad,
-                        area,
-                        nuevo_estado,
+                with col_estado:
+                    nuevo_estado = st.toggle(
+                        "Activa",
+                        value=activa,
+                        key=f"toggle_area_{especialidad}_{area}",
+                        label_visibility="collapsed",
                     )
-                    st.rerun()
 
-    with tab3:
-        st.markdown("### Especialidades")
-        _, rows = paginated_table(conn, "specialties", "list_specialties")
-        data = []
-        for nombre, req_sub, active in rows:
-            data.append(
-                {
-                    "especialidad": nombre,
-                    "requiere_area": "Sí" if req_sub else "No",
-                    "activa": "Sí" if active else "No",
-                }
-            )
-        st.dataframe(data, width="stretch", hide_index=True)
+                    if nuevo_estado != activa:
+                        set_subspecialty_active(
+                            conn,
+                            especialidad,
+                            area,
+                            nuevo_estado,
+                        )
+                        st.rerun()
 
-        st.markdown("### Áreas")
-        _, rows_areas = paginated_table(conn, "areas", "list_areas")
-        data_areas = []
-        for specialty_name, name, active in rows_areas:
-            data_areas.append(
-                {
-                    "especialidad": specialty_name,
-                    "área": name,
-                    "activa": "Sí" if active else "No",
-                }
-            )
-        st.dataframe(data_areas, width="stretch", hide_index=True)
+    if tab3.open:
+        with tab3:
+            st.markdown("### Especialidades")
+            _, rows = paginated_table(conn, "specialties", "list_specialties")
+            data = []
+            for nombre, req_sub, active in rows:
+                data.append(
+                    {
+                        "especialidad": nombre,
+                        "requiere_area": "Sí" if req_sub else "No",
+                        "activa": "Sí" if active else "No",
+                    }
+                )
+            st.dataframe(data, width="stretch", hide_index=True)
+
+            st.markdown("### Áreas")
+            _, rows_areas = paginated_table(conn, "areas", "list_areas")
+            data_areas = []
+            for specialty_name, name, active in rows_areas:
+                data_areas.append(
+                    {
+                        "especialidad": specialty_name,
+                        "área": name,
+                        "activa": "Sí" if active else "No",
+                    }
+                )
+            st.dataframe(data_areas, width="stretch", hide_index=True)
 
     st.markdown("### Configuración de profesiones")
-    with st.expander("Añadir nueva profesión clínica y gestionar profesiones"):
-        nueva_profesion = st.text_input(
-            "Nueva profesión clínica", key="cfg_new_profession"
-        )
-        st.caption(
-            "Médico rehabilitador tiene rol Médico; Administrador, rol administrativo. Las demás profesiones tienen rol Clínico."
-        )
-        if st.button("Añadir profesión clínica", key="cfg_add_profession"):
-            if not nueva_profesion.strip():
-                st.error("Introduce el nombre de la profesión.")
-            else:
-                add_profession_config(conn, nueva_profesion)
-                st.rerun()
-        _, active_professions = paginated_table(conn, "professions", "manage_professions")
-        for nombre_profesion, activa in active_professions:
-            nuevo_estado = st.toggle(
-                nombre_profesion,
-                value=activa,
-                key=f"cfg_profession_{nombre_profesion}",
-                disabled=nombre_profesion == "Administrador",
+    with st.expander('Añadir nueva profesión clínica y gestionar profesiones', key='settings_professions', on_change="rerun") as panel:
+        if panel.open:
+            nueva_profesion = st.text_input(
+                "Nueva profesión clínica", key="cfg_new_profession"
             )
-            if nuevo_estado != activa:
-                set_profession_active(conn, nombre_profesion, nuevo_estado)
-                st.rerun()
-        st.caption("Desactivar una profesión no modifica los usuarios existentes.")
+            st.caption(
+                "Médico rehabilitador tiene rol Médico; Administrador, rol administrativo. Las demás profesiones tienen rol Clínico."
+            )
+            if st.button("Añadir profesión clínica", key="cfg_add_profession"):
+                if not nueva_profesion.strip():
+                    st.error("Introduce el nombre de la profesión.")
+                else:
+                    add_profession_config(conn, nueva_profesion)
+                    st.rerun()
+            _, active_professions = paginated_table(conn, "professions", "manage_professions")
+            for nombre_profesion, activa in active_professions:
+                nuevo_estado = st.toggle(
+                    nombre_profesion,
+                    value=activa,
+                    key=f"cfg_profession_{nombre_profesion}",
+                    disabled=nombre_profesion == "Administrador",
+                )
+                if nuevo_estado != activa:
+                    set_profession_active(conn, nombre_profesion, nuevo_estado)
+                    st.rerun()
+            st.caption("Desactivar una profesión no modifica los usuarios existentes.")
