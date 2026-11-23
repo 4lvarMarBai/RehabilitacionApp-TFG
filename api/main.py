@@ -47,6 +47,7 @@ from servidor.ai_policy import (
 from api.security import (
     admin_user,
     medical_user,
+    request_author,
     care_user,
     bearer,
     current_user,
@@ -388,7 +389,7 @@ def preview(
 
 @app.post("/requests")
 def create_request(
-    body: WaitingRequest, user=Depends(ready_user), conn=Depends(get_conn)
+    body: WaitingRequest, user=Depends(request_author), conn=Depends(get_conn)
 ):
     error = validar_preferencias_tratamiento(
         body.slot_type, body.time_preference, body.transport_mode, body.preferred_hour
@@ -549,6 +550,23 @@ def sessions(
 def session_summary(rehab_id: int, _user=Depends(care_user), conn=Depends(get_conn)):
     treatment(conn, rehab_id, viewer=_user)
     return svc.get_session_summary(conn, rehab_id)
+
+
+@app.get("/treatments/{rehab_id}/initial-note")
+def initial_note(rehab_id: int, user=Depends(care_user), conn=Depends(get_conn)):
+    with conn.transaction():
+        treatment(conn, rehab_id, viewer=user)
+        _, rows = fetch_all(conn, """
+            SELECT w.initial_note, COALESCE(u.full_name, w.initial_note_author), w.created_at
+            FROM rehab_active a
+            JOIN waitlist w ON w.id = a.source_waitlist_id
+            LEFT JOIN users u ON u.dni = w.initial_note_author
+            WHERE a.id = %s
+        """, (rehab_id,))
+    if not rows or not rows[0][0]:
+        return {"note": "", "author": None, "created_at": None}
+    note, author, created_at = rows[0]
+    return encode({"note": note, "author": author, "created_at": created_at})
 
 
 @app.get("/treatments/{rehab_id}/followup")

@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.db import get_conn
-from comun.roles import can_use_ai_summary
+from comun.roles import can_create_request, can_use_ai_summary
 from api.access import require_care_role
 
 
@@ -160,6 +160,13 @@ def medical_user(user=Depends(ready_user)):
     """Solo el médico rehabilitador puede solicitar resultados de IA."""
     if not can_use_ai_summary(user):
         raise HTTPException(403, "Los resúmenes de IA están reservados al médico rehabilitador.")
+    return user
+
+
+def request_author(user=Depends(ready_user)):
+    """Autoriza la creación de solicitudes, también fuera del formulario."""
+    if not can_create_request(user):
+        raise HTTPException(403, "Solo los médicos y administradores pueden crear solicitudes.")
     return user
 
 

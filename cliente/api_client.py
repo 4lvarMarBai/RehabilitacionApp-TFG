@@ -328,6 +328,10 @@ def preview_next_patient(
     )
 
 
+def get_initial_treatment_note(conn, rehab_active_id):
+    return _request("GET", f"/treatments/{rehab_active_id}/initial-note")
+
+
 def add_waiting_patient_multiple(
     conn,
     patient_id,

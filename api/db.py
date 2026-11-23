@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from psycopg_pool import ConnectionPool
 
-from servidor.database import get_database_url
+from servidor.database import get_database_url, init_request_notes
 from api.access import init_access_log
 from servidor.auth import init_professions_db, init_visit_log_db, init_user_roles
 
@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
         pool.open(wait=True, timeout=30)
         with pool.connection() as conn:
             with conn.transaction():
+                init_request_notes(conn)
                 init_access_log(conn)
                 init_user_roles(conn)
                 init_professions_db(conn)

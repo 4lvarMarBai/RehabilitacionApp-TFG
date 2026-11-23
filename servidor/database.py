@@ -61,6 +61,13 @@ def now_iso():
     return datetime.now(UTC).isoformat()
 
 
+def init_request_notes(conn):
+    """Conserva las indicaciones iniciales en la solicitud de origen."""
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS initial_note TEXT NOT NULL DEFAULT ''")
+        cur.execute("ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS initial_note_author TEXT")
+
+
 def init_db(conn):
     with conn.cursor() as cur:
         cur.execute("""
@@ -121,6 +128,8 @@ def init_db(conn):
             specialty TEXT NOT NULL,
             subspecialty TEXT,
             prescribed_sessions INTEGER,
+            initial_note TEXT NOT NULL DEFAULT '',
+            initial_note_author TEXT,
             slot_type TEXT,
             time_preference TEXT,
             transport_mode TEXT,
@@ -331,3 +340,5 @@ def init_db(conn):
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_rehab_patient_active ON rehab_active (patient_id, id DESC) WHERE status = 'ACTIVO'"
         )
+
+    init_request_notes(conn)

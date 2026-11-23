@@ -7,7 +7,7 @@ from datetime import date, time
 import streamlit as st
 import json
 
-from comun.roles import can_use_ai_summary, role_for_profession, ROLE_LABELS
+from comun.roles import can_create_request, can_use_ai_summary, role_for_profession, ROLE_LABELS
 from comun.config import (
     PRIORIDADES,
     MESES_ES,
@@ -49,6 +49,7 @@ from cliente.api_client import (
     discharge_patient,
     add_treatment_session,
     get_session_summary,
+    get_initial_treatment_note,
     get_stats,
     delete_waitlist_entry,
     delete_active_treatment,
@@ -79,6 +80,7 @@ from cliente.ui_helpers import (
     mostrar_evolucion_rodilla,
     mostrar_informe_texto,
     mostrar_aviso_solicitud_repetida,
+    mostrar_anotacion_inicial,
 )
 from comun.medidas_rodilla import MEDIDAS, puntuacion_koos_jr
 from cliente.api_client import (
@@ -229,6 +231,7 @@ if st.session_state.get("_identidad_acceso", identidad_acceso) != identidad_acce
             st.session_state.pop(clave, None)
 st.session_state["_identidad_acceso"] = identidad_acceso
 puede_usar_resumen_ia = can_use_ai_summary(usuario_actual)
+puede_crear_solicitudes = can_create_request(usuario_actual)
 if not puede_usar_resumen_ia:
     # Un cambio de cuenta o de permisos no debe dejar resultados anteriores visibles.
     for clave in list(st.session_state):
@@ -250,6 +253,9 @@ opciones_paginas = [
     "🧾 Auditoría clínica",
 ]
 
+if not puede_crear_solicitudes:
+    opciones_paginas.remove("📝 Nueva solicitud")
+
 if rol_usuario == "ADMIN":
     opciones_paginas = [p for p in opciones_paginas if p not in {
         "⚕️ Tratamientos activos", "📈 Seguimiento clínico", "📉 Dashboard clínico"
@@ -257,6 +263,8 @@ if rol_usuario == "ADMIN":
     opciones_paginas.append("⚙️ Ajustes")
     opciones_paginas.append("📖 Registro de visitas")
 
+if st.session_state.get("nav_page") not in opciones_paginas:
+    st.session_state["nav_page"] = opciones_paginas[0]
 page = st.sidebar.radio("Secciones", opciones_paginas, index=0, key="nav_page")
 
 # Cargar bibliotecas gráficas solo al entrar en las pantallas que las utilizan.
@@ -656,11 +664,18 @@ elif page == "📝 Nueva solicitud":
     sesiones_por_especialidad = {}
     areas_por_especialidad = {}
     sesiones_por_area = {}
+    anotaciones_por_especialidad = {}
+    anotaciones_por_area = {}
 
     if selected_specialties:
         st.markdown("### Número de sesiones orientativas por especialidad (opcional)")
         for sp in selected_specialties:
             if not specialty_requires_subspecialty(conn, sp):
+                anotaciones_por_especialidad[sp] = st.text_area(
+                    f"Anotación inicial para {sp} (opcional)",
+                    help="Indique el tratamiento solicitado, los objetivos y las precauciones que deba conocer el clínico.",
+                    max_chars=10000, key=f"req_initial_note_{sp}",
+                ).strip()
                 sesiones_por_especialidad[sp] = st.text_input(
                     f"Sesiones orientativas para {sp} (opcional)",
                     placeholder="Ej: 10",
@@ -682,6 +697,11 @@ elif page == "📝 Nueva solicitud":
                     f"### Número de sesiones orientativas por área de {sp} (opcional)"
                 )
                 for sub in areas_por_especialidad[sp]:
+                    anotaciones_por_area[(sp, sub)] = st.text_area(
+                        f"Anotación inicial para {sp} · {sub} (opcional)",
+                        help="Indique el tratamiento solicitado, los objetivos y las precauciones que deba conocer el clínico.",
+                        max_chars=10000, key=f"req_initial_note_{sp}_{sub}",
+                    ).strip()
                     sesiones_por_area[(sp, sub)] = st.text_input(
                         f"Sesiones orientativas para {sp} · {sub} (opcional)",
                         placeholder="Ej: 10",
@@ -699,6 +719,8 @@ elif page == "📝 Nueva solicitud":
         "specialties": selected_specialties, "areas": areas_por_especialidad,
         "sessions": sesiones_por_especialidad,
         "area_sessions": [(sp, sub, valor) for (sp, sub), valor in sesiones_por_area.items()],
+        "initial_notes": anotaciones_por_especialidad,
+        "area_initial_notes": [(sp, sub, valor) for (sp, sub), valor in anotaciones_por_area.items()],
         "slot": slot_type, "shift": time_preference,
         "transport": transport_mode, "hour": preferred_hour,
         "coordination": coordination_rule, "consent": ai_consent_accepted,
@@ -752,6 +774,7 @@ elif page == "📝 Nueva solicitud":
                             {
                                 "specialty": sp,
                                 "subspecialty": sub,
+                                "initial_note": anotaciones_por_area.get((sp, sub), ""),
                                 "prescribed_sessions": int(sesiones_por_area[(sp, sub)])
                                 if sesiones_por_area.get((sp, sub))
                                 else None,
@@ -762,6 +785,7 @@ elif page == "📝 Nueva solicitud":
                         {
                             "specialty": sp,
                             "subspecialty": None,
+                            "initial_note": anotaciones_por_especialidad.get(sp, ""),
                             "prescribed_sessions": int(sesiones_por_especialidad[sp])
                             if sesiones_por_especialidad.get(sp)
                             else None,
@@ -869,6 +893,10 @@ elif page == "⚕️ Tratamientos activos":
             key="session_patient_pick",
         )
         selected_patient = options[selected_label]
+
+        mostrar_anotacion_inicial(
+            get_initial_treatment_note(conn, selected_patient["rehab_active_id"])
+        )
 
         dias_texto = (
             ", ".join(selected_patient["attendance_days"])
@@ -1162,6 +1190,10 @@ elif page == "📈 Seguimiento clínico":
 
         selected_patient = options[selected_label]
 
+        mostrar_anotacion_inicial(
+            get_initial_treatment_note(conn, selected_patient["rehab_active_id"])
+        )
+
         summary = get_clinical_followup_summary(
             conn, selected_patient["rehab_active_id"]
         )
@@ -1453,6 +1485,10 @@ elif page == "📉 Dashboard clínico":
                 key="dashboard_patient_pick",
             )
             selected_patient = options[selected_label]
+
+            mostrar_anotacion_inicial(
+                get_initial_treatment_note(conn, selected_patient["rehab_active_id"])
+            )
 
             resumen = get_clinical_followup_summary(
                 conn, selected_patient["rehab_active_id"]

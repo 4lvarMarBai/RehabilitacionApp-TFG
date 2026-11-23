@@ -324,3 +324,12 @@ def audit_event_label(event):
         "REASIGNACION_TRATAMIENTO": "Reasignación de tratamiento",
         "GENERACION_RESUMEN_IA": "Generación de resumen con IA",
     }.get(event, (event or "Evento sin identificar").replace("_", " ").capitalize())
+def mostrar_anotacion_inicial(datos):
+    """Muestra la indicación de origen sin interpretarla ni permitir su edición."""
+    if not datos.get("note"):
+        return
+    st.markdown("#### Anotación inicial de la solicitud")
+    st.text(datos["note"])
+    autor = datos.get("author") or "Autor no disponible"
+    fecha = str(datos.get("created_at") or "")[:10]
+    st.caption(f"Registrada por: {autor}" + (f" · Fecha: {fecha}" if fecha else ""))

@@ -221,6 +221,8 @@ def add_waiting_patient_multiple(
                         specialty,
                         subspecialty,
                         prescribed_sessions,
+                        initial_note,
+                        initial_note_author,
                         slot_type,
                         time_preference,
                         transport_mode,
@@ -232,7 +234,7 @@ def add_waiting_patient_multiple(
                         eligible
                     )
                     VALUES (
-                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, 'EN_ESPERA', %s
                     )
                     RETURNING id
@@ -243,6 +245,8 @@ def add_waiting_patient_multiple(
                         req["specialty"],
                         req["subspecialty"],
                         req["prescribed_sessions"],
+                        req.get("initial_note", "").strip(),
+                        actor,
                         slot_type,
                         time_preference,
                         transport_mode,

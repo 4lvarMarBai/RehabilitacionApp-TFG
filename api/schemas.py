@@ -24,6 +24,7 @@ class SpecialtyRequest(Body):
     specialty: str = Field(min_length=1, max_length=150)
     subspecialty: str | None = Field(default=None, max_length=150)
     prescribed_sessions: int | None = Field(default=None, ge=1, le=1000)
+    initial_note: str = Field(default="", max_length=10000)
 
 
 class WaitingRequest(Body):

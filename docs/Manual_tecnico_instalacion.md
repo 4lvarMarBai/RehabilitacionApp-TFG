@@ -126,6 +126,12 @@ Las funciones administrativas usan `admin_user`; las asistenciales usan `care_us
 
 ### 4.2. Escritura de solicitudes y asignaciones
 
+Solo los roles Médico y Administrador pueden crear solicitudes. La función `can_create_request()` de `comun/roles.py` controla la opción de la interfaz y la dependencia `request_author` de `api/security.py` protege `POST /requests`. Las peticiones de clínicos se rechazan con un 403, aunque se envíen directamente a la API. El clínico conserva la posibilidad de asignarse solicitudes de la lista de espera y trabajar con sus tratamientos.
+
+Para cada especialidad o área, el médico o el administrador puede escribir una **Anotación inicial** con el tratamiento solicitado, los objetivos y las precauciones. El campo `initial_note` es opcional y admite hasta 10.000 caracteres. Se guarda en `waitlist` junto al DNI de quien lo registra; la fecha es la de creación de la solicitud. Al iniciar la API, `init_request_notes()` prepara los campos sin cambiar los datos existentes.
+
+El clínico asignado puede leer la anotación al seleccionar el tratamiento en Tratamientos activos, Seguimiento clínico o el panel individual del Dashboard. `GET /treatments/{id}/initial-note` comprueba sus permisos antes de consultar la solicitud de origen mediante `source_waitlist_id`; también permite el acceso médico. El texto se muestra con autor y fecha y no se edita desde el tratamiento. Al transferirlo a otro clínico, el nuevo responsable conserva el acceso a la anotación original. Esta información no se añade automáticamente a las notas de las sesiones ni a las entradas del resumen de IA.
+
 La API valida entradas y catálogos antes de llamar a `add_waiting_patient_multiple`. Esta guarda las entradas de espera y su auditoría en una transacción. En modo de demostración guarda también la decisión simulada sobre IA. En modo clínico, la solicitud puede registrarse sin consentimiento de IA. El médico rehabilitador puede registrar la decisión documentada desde Seguimiento clínico; el clínico asignado también puede registrarla, pero no puede generar ni consultar resúmenes de IA.
 
 Antes de crear solicitudes, el servidor comprueba si el mismo NHC ya tiene registros para la misma especialidad y área creados en los últimos **tres meses naturales**. Las solicitudes pendientes y las asociadas a un tratamiento activo se comprueban aunque sean anteriores. En especialidades sin áreas, se compara la especialidad y el área vacía. La fecha que se utiliza es la de creación del registro en el sistema, no la fecha de solicitud que introduce el usuario.
@@ -602,7 +608,7 @@ Antes de un uso asistencial, deben delimitarse las funciones y documentarse la d
 | Rol | Acceso asistencial | Administración |
 |---|---|---|
 | CLINICO | Tratamientos actualmente asignados a su DNI, incluidas sus sesiones e historial. Registra sesiones y altas. Los listados y la auditoría se filtran por esa asignación. | Sin gestión de usuarios ni catálogos. |
-| MEDICO | Puede consultar los tratamientos de todos los pacientes. Es el único que genera resúmenes de IA, con los controles de consentimiento y modo correspondientes. | No dispone de funciones administrativas. |
+| MEDICO | Crea solicitudes y puede consultar los tratamientos de todos los pacientes. Es el único que genera resúmenes de IA, con los controles de consentimiento y modo correspondientes. | No dispone de funciones administrativas. |
 | ADMIN | Gestiona solicitudes, usuarios, catálogos, bajas y reasignaciones. No recibe notas clínicas, informes de seguimiento, resúmenes de IA ni comentarios y motivos libres de la auditoría clínica. | Consulta los registros de visitas y de seguridad. |
 
 La lista de espera y los contadores generales de actividad conservan su finalidad operativa. Los indicadores clínicos globales del Dashboard se reservan al médico. La interfaz adapta sus opciones, pero la protección se aplica también cuando se llama directamente a la API. Al cambiar de identidad o de rol se elimina el estado temporal; un rechazo de acceso invalida la caché de la petición y los resultados temporales de IA.
