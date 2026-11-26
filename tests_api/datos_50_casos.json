@@ -1,0 +1,1392 @@
+[
+  {
+    "case": "Rodilla",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-02",
+        "clinical_note": "El paciente refiere dolor 7/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-03",
+        "clinical_note": "El profesional registra que el objetivo es mejorar escaleras."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-04",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-05",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-06",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-07",
+        "clinical_note": "El paciente refiere dolor 3/10 al final. No refirió caídas. El profesional registra: Sube cuatro escalones con apoyo."
+      }
+    ]
+  },
+  {
+    "case": "Hombro",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-03",
+        "clinical_note": "El paciente refiere dolor 6/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-04",
+        "clinical_note": "El profesional registra que el objetivo es mejorar alcance."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-05",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-06",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-07",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-08",
+        "clinical_note": "El paciente refiere dolor 2/10 al final. Desmintió dolor nocturno. El profesional registra: Alcanza un estante bajo con ayuda."
+      }
+    ]
+  },
+  {
+    "case": "Marcha",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-04",
+        "clinical_note": "El paciente refiere dolor 4/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-05",
+        "clinical_note": "El profesional registra que el objetivo es mejorar marcha."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-06",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-07",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-08",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-09",
+        "clinical_note": "El paciente refiere dolor 4/10 al final. Sin mareo observado. El profesional registra: Camina 35 metros con andador."
+      }
+    ]
+  },
+  {
+    "case": "Tobillo",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-05",
+        "clinical_note": "El paciente refiere dolor 8/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-06",
+        "clinical_note": "El profesional registra que el objetivo es mejorar equilibrio."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-07",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-08",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-09",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-10",
+        "clinical_note": "El paciente refiere dolor 5/10 al final. No se observó edema. El profesional registra: Mantiene apoyo unipodal 12 segundos."
+      }
+    ]
+  },
+  {
+    "case": "Mano",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-06",
+        "clinical_note": "El paciente refiere dolor 6/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-07",
+        "clinical_note": "El profesional registra que el objetivo es mejorar vestido."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-08",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-09",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-10",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-11",
+        "clinical_note": "El paciente refiere dolor 3/10 al final. No refirió hormigueo. El profesional registra: Cierra tres botones con ayuda."
+      }
+    ]
+  },
+  {
+    "case": "Transferencias",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-07",
+        "clinical_note": "El paciente refiere dolor 5/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-08",
+        "clinical_note": "El profesional registra que el objetivo es mejorar transferencias."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-09",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-10",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-11",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-12",
+        "clinical_note": "El paciente refiere dolor 2/10 al final. No refirió caídas. El profesional registra: Pasa de silla a cama con supervisión."
+      }
+    ]
+  },
+  {
+    "case": "Espalda",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-08",
+        "clinical_note": "El paciente refiere dolor 7/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-09",
+        "clinical_note": "El profesional registra que el objetivo es mejorar sedestación."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-10",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-11",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-12",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-13",
+        "clinical_note": "El paciente refiere dolor 4/10 al final. No refirió irradiación. El profesional registra: Permanece sentado 25 minutos."
+      }
+    ]
+  },
+  {
+    "case": "Cadera",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-09",
+        "clinical_note": "El paciente refiere dolor 6/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-10",
+        "clinical_note": "El profesional registra que el objetivo es mejorar marcha."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-11",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-12",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-13",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-14",
+        "clinical_note": "El paciente refiere dolor 4/10 al final. No se observaron incidentes. El profesional registra: Camina 60 metros con bastón."
+      }
+    ]
+  },
+  {
+    "case": "Muñeca",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-10",
+        "clinical_note": "El paciente refiere dolor 5/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-11",
+        "clinical_note": "El profesional registra que el objetivo es mejorar agarre."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-12",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-13",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-14",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-15",
+        "clinical_note": "El paciente refiere dolor 3/10 al final. Sin pérdida de sensibilidad referida. El profesional registra: Sujeta un vaso vacío con ambas manos."
+      }
+    ]
+  },
+  {
+    "case": "Resistencia",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-01-11",
+        "clinical_note": "El paciente refiere dolor 3/10 al inicio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-01-12",
+        "clinical_note": "El profesional registra que el objetivo es mejorar resistencia."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-01-13",
+        "clinical_note": "Sesión realizada. No se midió el dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-01-14",
+        "clinical_note": "Las anotaciones de dos profesionales discrepan sobre si precisó ayuda."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-01-15",
+        "clinical_note": "Pendiente de reevaluar el objetivo. No consta alta."
+      },
+      {
+        "source_id": "F6",
+        "date": "2026-01-16",
+        "clinical_note": "El paciente refiere dolor 4/10 al final. Niega mareo. El profesional registra: Camina 8 minutos con una pausa."
+      }
+    ]
+  },
+  {
+    "case": "flexión-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-01",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega edema en la rodilla."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-04",
+        "clinical_note": "El profesional anota como objetivo trabajar flexión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-07",
+        "clinical_note": "El profesional registra: Flexiona la rodilla 68 grados con asistencia. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-10",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "flexión-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-04",
+        "clinical_note": "El paciente refiere edema en la rodilla. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-05",
+        "clinical_note": "El profesional registra: Flexiona la rodilla 69 grados con asistencia."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-06",
+        "clinical_note": "En revisión, el paciente niega edema en la rodilla y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-07",
+        "clinical_note": "Queda pendiente valorar el objetivo de flexión. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "flexión-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-07",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar flexión."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-09",
+        "clinical_note": "El profesional registra: Flexiona la rodilla 70 grados con asistencia."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-11",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-13",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega edema en la rodilla."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-02-15",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "flexión-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-10",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega edema en la rodilla."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-13",
+        "clinical_note": "El profesional registra: Flexiona la rodilla 71 grados con asistencia. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-16",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de flexión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-19",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "flexión-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-13",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar flexión."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-14",
+        "clinical_note": "El profesional registra: Flexiona la rodilla 72 grados con asistencia."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-15",
+        "clinical_note": "El paciente niega edema en la rodilla. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-16",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "marcha-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-16",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega mareo durante la marcha."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-18",
+        "clinical_note": "El profesional anota como objetivo trabajar marcha."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-20",
+        "clinical_note": "El profesional registra: Camina 24 metros con bastón y supervisión. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-22",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "marcha-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-19",
+        "clinical_note": "El paciente refiere mareo durante la marcha. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-22",
+        "clinical_note": "El profesional registra: Camina 25 metros con bastón y supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-25",
+        "clinical_note": "En revisión, el paciente niega mareo durante la marcha y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-28",
+        "clinical_note": "Queda pendiente valorar el objetivo de marcha. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "marcha-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-22",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar marcha."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-23",
+        "clinical_note": "El profesional registra: Camina 26 metros con bastón y supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-02-24",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-02-25",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega mareo durante la marcha."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-02-26",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "marcha-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-25",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega mareo durante la marcha."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-02-27",
+        "clinical_note": "El profesional registra: Camina 27 metros con bastón y supervisión. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-01",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de marcha."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-03",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "marcha-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-02-28",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar marcha."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-03",
+        "clinical_note": "El profesional registra: Camina 28 metros con bastón y supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-06",
+        "clinical_note": "El paciente niega mareo durante la marcha. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-09",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "agarre-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-03",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega hormigueo en la mano."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-04",
+        "clinical_note": "El profesional anota como objetivo trabajar agarre."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-05",
+        "clinical_note": "El profesional registra: Sostiene un objeto ligero 32 segundos con ambas manos. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-06",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "agarre-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-06",
+        "clinical_note": "El paciente refiere hormigueo en la mano. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-08",
+        "clinical_note": "El profesional registra: Sostiene un objeto ligero 33 segundos con ambas manos."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-10",
+        "clinical_note": "En revisión, el paciente niega hormigueo en la mano y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-12",
+        "clinical_note": "Queda pendiente valorar el objetivo de agarre. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "agarre-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-09",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar agarre."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-12",
+        "clinical_note": "El profesional registra: Sostiene un objeto ligero 34 segundos con ambas manos."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-15",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-18",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega hormigueo en la mano."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-03-21",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "agarre-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-12",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega hormigueo en la mano."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-13",
+        "clinical_note": "El profesional registra: Sostiene un objeto ligero 35 segundos con ambas manos. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-14",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de agarre."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-15",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "agarre-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-15",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar agarre."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-17",
+        "clinical_note": "El profesional registra: Sostiene un objeto ligero 36 segundos con ambas manos."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-19",
+        "clinical_note": "El paciente niega hormigueo en la mano. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-21",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "equilibrio-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-18",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega pérdida de equilibrio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-21",
+        "clinical_note": "El profesional anota como objetivo trabajar equilibrio."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-24",
+        "clinical_note": "El profesional registra: Mantiene la posición de pie 14 segundos con apoyo. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-27",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "equilibrio-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-21",
+        "clinical_note": "El paciente refiere pérdida de equilibrio. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-22",
+        "clinical_note": "El profesional registra: Mantiene la posición de pie 15 segundos con apoyo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-23",
+        "clinical_note": "En revisión, el paciente niega pérdida de equilibrio y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-24",
+        "clinical_note": "Queda pendiente valorar el objetivo de equilibrio. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "equilibrio-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-24",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar equilibrio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-26",
+        "clinical_note": "El profesional registra: Mantiene la posición de pie 16 segundos con apoyo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-03-28",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-03-30",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega pérdida de equilibrio."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-04-01",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "equilibrio-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-27",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega pérdida de equilibrio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-30",
+        "clinical_note": "El profesional registra: Mantiene la posición de pie 17 segundos con apoyo. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-02",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de equilibrio."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-05",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "equilibrio-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-03-30",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar equilibrio."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-03-31",
+        "clinical_note": "El profesional registra: Mantiene la posición de pie 18 segundos con apoyo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-01",
+        "clinical_note": "El paciente niega pérdida de equilibrio. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-02",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "sedestación-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-02",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega dolor irradiado."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-04",
+        "clinical_note": "El profesional anota como objetivo trabajar sedestación."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-06",
+        "clinical_note": "El profesional registra: Permanece sentado 18 minutos con respaldo. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-08",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "sedestación-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-05",
+        "clinical_note": "El paciente refiere dolor irradiado. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-08",
+        "clinical_note": "El profesional registra: Permanece sentado 19 minutos con respaldo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-11",
+        "clinical_note": "En revisión, el paciente niega dolor irradiado y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-14",
+        "clinical_note": "Queda pendiente valorar el objetivo de sedestación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "sedestación-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-08",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar sedestación."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-09",
+        "clinical_note": "El profesional registra: Permanece sentado 20 minutos con respaldo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-10",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-11",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega dolor irradiado."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-04-12",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "sedestación-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-11",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega dolor irradiado."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-13",
+        "clinical_note": "El profesional registra: Permanece sentado 21 minutos con respaldo. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-15",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de sedestación."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-17",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "sedestación-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-14",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar sedestación."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-17",
+        "clinical_note": "El profesional registra: Permanece sentado 22 minutos con respaldo."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-20",
+        "clinical_note": "El paciente niega dolor irradiado. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-23",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "resistencia-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-17",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega disnea durante la tarea."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-18",
+        "clinical_note": "El profesional anota como objetivo trabajar resistencia."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-19",
+        "clinical_note": "El profesional registra: Completa 9 repeticiones con una pausa. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-20",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "resistencia-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-20",
+        "clinical_note": "El paciente refiere disnea durante la tarea. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-22",
+        "clinical_note": "El profesional registra: Completa 10 repeticiones con una pausa."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-24",
+        "clinical_note": "En revisión, el paciente niega disnea durante la tarea y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-26",
+        "clinical_note": "Queda pendiente valorar el objetivo de resistencia. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "resistencia-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-23",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar resistencia."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-26",
+        "clinical_note": "El profesional registra: Completa 11 repeticiones con una pausa."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-29",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-02",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega disnea durante la tarea."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-05-05",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "resistencia-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-26",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega disnea durante la tarea."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-04-27",
+        "clinical_note": "El profesional registra: Completa 12 repeticiones con una pausa. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-04-28",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de resistencia."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-04-29",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "resistencia-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-04-29",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar resistencia."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-01",
+        "clinical_note": "El profesional registra: Completa 13 repeticiones con una pausa."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-03",
+        "clinical_note": "El paciente niega disnea durante la tarea. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-05",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "alcance-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-02",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega dolor nocturno."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-05",
+        "clinical_note": "El profesional anota como objetivo trabajar alcance."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-08",
+        "clinical_note": "El profesional registra: Alcanza un objeto a 35 centímetros con ayuda. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-11",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "alcance-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-05",
+        "clinical_note": "El paciente refiere dolor nocturno. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-06",
+        "clinical_note": "El profesional registra: Alcanza un objeto a 36 centímetros con ayuda."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-07",
+        "clinical_note": "En revisión, el paciente niega dolor nocturno y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-08",
+        "clinical_note": "Queda pendiente valorar el objetivo de alcance. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "alcance-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-08",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar alcance."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-10",
+        "clinical_note": "El profesional registra: Alcanza un objeto a 37 centímetros con ayuda."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-12",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-14",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega dolor nocturno."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-05-16",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "alcance-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-11",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega dolor nocturno."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-14",
+        "clinical_note": "El profesional registra: Alcanza un objeto a 38 centímetros con ayuda. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-17",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de alcance."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-20",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "alcance-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-14",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar alcance."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-15",
+        "clinical_note": "El profesional registra: Alcanza un objeto a 39 centímetros con ayuda."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-16",
+        "clinical_note": "El paciente niega dolor nocturno. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-17",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  },
+  {
+    "case": "destreza-1",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-17",
+        "clinical_note": "El paciente refiere dolor de 7/10 y niega pérdida de sensibilidad."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-19",
+        "clinical_note": "El profesional anota como objetivo trabajar destreza."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-21",
+        "clinical_note": "El profesional registra: Coloca 6 piezas con supervisión. No se midió dolor en esta sesión."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-23",
+        "clinical_note": "El paciente refiere dolor de 3/10. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "destreza-2",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-20",
+        "clinical_note": "El paciente refiere pérdida de sensibilidad. No se midió el dolor."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-23",
+        "clinical_note": "El profesional registra: Coloca 7 piezas con supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-26",
+        "clinical_note": "En revisión, el paciente niega pérdida de sensibilidad y refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-29",
+        "clinical_note": "Queda pendiente valorar el objetivo de destreza. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "destreza-3",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-23",
+        "clinical_note": "El paciente refiere dolor 3/10. El objetivo es trabajar destreza."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-24",
+        "clinical_note": "El profesional registra: Coloca 8 piezas con supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-25",
+        "clinical_note": "Sobre esa actividad, una anotación describe que necesitó ayuda y otra indica que la realizó sin ayuda. La discrepancia quedó sin resolver."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-05-26",
+        "clinical_note": "El paciente refiere dolor 5/10 y niega pérdida de sensibilidad."
+      },
+      {
+        "source_id": "F5",
+        "date": "2026-05-27",
+        "clinical_note": "Sigue pendiente la reevaluación. No consta alta."
+      }
+    ]
+  },
+  {
+    "case": "destreza-4",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-26",
+        "clinical_note": "El paciente refiere dolor 6/10 y niega pérdida de sensibilidad."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-05-28",
+        "clinical_note": "El profesional registra: Coloca 9 piezas con supervisión. Falta la medida de dolor de esta sesión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-05-30",
+        "clinical_note": "El paciente refiere dolor 2/10. El profesional aplaza la revisión del objetivo de destreza."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-06-01",
+        "clinical_note": "Se anota una posible alta para la próxima revisión. En esta sesión no se dio el alta."
+      }
+    ]
+  },
+  {
+    "case": "destreza-5",
+    "source": [
+      {
+        "source_id": "F1",
+        "date": "2026-05-29",
+        "clinical_note": "El paciente refiere dolor 5/10. El profesional registra como objetivo trabajar destreza."
+      },
+      {
+        "source_id": "F2",
+        "date": "2026-06-01",
+        "clinical_note": "El profesional registra: Coloca 10 piezas con supervisión."
+      },
+      {
+        "source_id": "F3",
+        "date": "2026-06-04",
+        "clinical_note": "El paciente niega pérdida de sensibilidad. Refiere dolor 4/10."
+      },
+      {
+        "source_id": "F4",
+        "date": "2026-06-07",
+        "clinical_note": "El profesional documenta que el tratamiento finalizó y el alta ya se registró."
+      }
+    ]
+  }
+]

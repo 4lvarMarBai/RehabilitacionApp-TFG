@@ -260,6 +260,7 @@ if rol_usuario == "ADMIN":
     opciones_paginas = [p for p in opciones_paginas if p not in {
         "⚕️ Tratamientos activos", "📈 Seguimiento clínico", "📉 Dashboard clínico"
     }]
+    opciones_paginas = ["🧾 Auditoría" if p == "🧾 Auditoría clínica" else p for p in opciones_paginas]
     opciones_paginas.append("⚙️ Ajustes")
     opciones_paginas.append("📖 Registro de visitas")
 
@@ -1698,8 +1699,10 @@ elif page == "📉 Dashboard clínico":
             else:
                 st.info("No hay eventos con los filtros seleccionados.")
 
-elif page == "🧾 Auditoría clínica":
-    st.subheader("Registro de auditoría clínica")
+elif page in {"🧾 Auditoría clínica", "🧾 Auditoría"}:
+    st.subheader("Registro de auditoría" if rol_usuario == "ADMIN" else "Registro de auditoría clínica")
+    if rol_usuario == "ADMIN":
+        st.caption("Puede consultar los eventos, su autor, el NHC y la fecha. Los comentarios y motivos clínicos permanecen ocultos.")
 
     busqueda_nhc_audit = st.text_input(
         "Buscar por NHC",
@@ -1856,6 +1859,11 @@ elif page == "⚙️ Ajustes":
         st.stop()
 
     st.subheader("⚙️ Ajustes del sistema")
+    def open_admin_audit():
+        st.session_state["nav_page"] = "🧾 Auditoría"
+    st.button("Consultar auditoría", key="open_admin_audit", on_click=open_admin_audit)
+    if notice := st.session_state.pop("user_created_notice", None):
+        st.success(notice)
 
     temporary = st.session_state.get("temporary_user_password")
     if temporary:
@@ -1994,7 +2002,7 @@ elif page == "⚙️ Ajustes":
         u1, u2 = st.columns(2)
         with u1:
             new_full_name = st.text_input("Nombre completo", key="new_user_full_name")
-            new_dni = st.text_input("DNI", key="new_user_dni").strip().upper()
+            new_dni = st.text_input("DNI", key="new_user_dni").upper()
             st.caption("El DNI será el nombre de usuario para iniciar sesión.")
         with u2:
             new_profession = st.selectbox(
@@ -2018,7 +2026,7 @@ elif page == "⚙️ Ajustes":
                 st.error("Introduce el nombre completo.")
 
             elif not is_valid_dni(new_dni):
-                st.error("El DNI no es válido.")
+                st.error("Introduce un DNI de 8 números y su letra de control correcta, sin espacios, puntos ni guion.")
 
             else:
                 _, dni_existente = get_table(conn, "user_dni", dni=new_dni)
@@ -2036,7 +2044,7 @@ elif page == "⚙️ Ajustes":
                         role=new_role,
                     )
                     if creado:
-                        st.success("Usuario registrado correctamente.")
+                        st.session_state["user_created_notice"] = f"Usuario registrado correctamente: {new_dni}. Su contraseña temporal aparece arriba."
                         st.rerun()
                     else:
                         st.error("Ya existe ese nombre de usuario o DNI.")
