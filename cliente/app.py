@@ -634,7 +634,11 @@ elif page == "📝 Nueva solicitud":
         slot_type = st.selectbox("Tipo de hueco", TIPOS_HUECO, key="req_slot_type")
 
     with cfg2:
-        time_preference = st.selectbox("Turno", TURNOS, key="req_time_preference")
+        time_preference = st.selectbox(
+            "Turno (opcional)", TURNOS, index=None,
+            placeholder="Mañana o tarde", key="req_time_preference",
+            help="Si lo deja vacío, el paciente puede acudir de mañana o de tarde. La ambulancia solo está disponible por la mañana.",
+        )
 
     with cfg3:
         transport_mode = st.selectbox(
@@ -649,6 +653,10 @@ elif page == "📝 Nueva solicitud":
             )
         else:
             st.caption("Hora fija: no aplica")
+
+    if transport_mode == "AMBULANCIA" and time_preference is None:
+        time_preference = "MAÑANA"
+        st.caption("El transporte en ambulancia limita el turno a la mañana.")
 
     coordination_rule = "NINGUNA"
     if hay_fisio_y_terapia_ocupacional(selected_specialties):
@@ -908,7 +916,7 @@ elif page == "⚕️ Tratamientos activos":
 
         st.caption(
             f"Hueco: {selected_patient['slot_type']} · "
-            f"Turno: {selected_patient['time_preference']} · "
+            f"Turno: {selected_patient['time_preference'] or 'Mañana o tarde'} · "
             f"Transporte: {selected_patient['transport_mode']}"
             + (
                 f" · Hora fija: {selected_patient['preferred_hour']}"
@@ -2100,7 +2108,7 @@ elif page == "⚙️ Ajustes":
         if pendientes:
             opciones_reasignar = {f"{r[1]} · {r[2]} · {r[3] or 'Sin área'} · {r[5]} · Tratamiento {r[0]}": r for r in pendientes}
             seleccionado = opciones_reasignar[st.selectbox("Tratamiento pendiente", list(opciones_reasignar), key="reassign_treatment")]
-            st.write(f"Hueco: {seleccionado[6]} · Turno: {seleccionado[7]} · Transporte: {seleccionado[8]} · Hora: {seleccionado[9] or 'Sin fijar'} · Días: {seleccionado[10] or 'Sin registrar'}")
+            st.write(f"Hueco: {seleccionado[6]} · Turno: {seleccionado[7] or 'Mañana o tarde'} · Transporte: {seleccionado[8]} · Hora: {seleccionado[9] or 'Sin fijar'} · Días: {seleccionado[10] or 'Sin registrar'}")
             _, sustitutos = paginated_table(conn, "available_clinicians", f"reassign_targets_{seleccionado[0]}", rehab_active_id=seleccionado[0])
             if sustitutos:
                 opciones_sustituto = {f"{u[2]} · {u[1]} · {u[3]}": u[0] for u in sustitutos}

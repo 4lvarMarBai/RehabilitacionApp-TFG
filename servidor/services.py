@@ -67,7 +67,12 @@ def _waiting_filters(
         if value and value != "Todas":
             if value not in allowed:
                 raise ValueError("Filtro de asignación no válido.")
-            conditions.append(f"{column} = %s")
+            if column == "time_preference":
+                conditions.append("(time_preference = %s OR NULLIF(time_preference, '') IS NULL)")
+                if value == "TARDE":
+                    conditions.append("COALESCE(transport_mode, 'NORMAL') <> 'AMBULANCIA'")
+            else:
+                conditions.append(f"{column} = %s")
             params.append(value)
 
     return conditions, params
@@ -191,6 +196,9 @@ def add_waiting_patient_multiple(
     confirm_duplicate: bool = False,
 ):
     """Guarda el consentimiento y una solicitud por tratamiento en una misma transacción."""
+    time_preference = time_preference or None
+    if transport_mode == "AMBULANCIA" and time_preference is None:
+        time_preference = "MAÑANA"
     if ai_use_mode() == "demo" and ai_consent_accepted is None:
         raise ValueError(
             "Debe registrarse la decisión del paciente sobre el uso de IA."
@@ -382,6 +390,9 @@ def assign_next_patient(
             coordination_rule,
             wait_days,
         ) = row
+
+        if not time_preference and time_preference_filter in {"MAÑANA", "TARDE"}:
+            time_preference = time_preference_filter
 
         error = validar_regla_coordinacion(
             conn,

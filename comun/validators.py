@@ -55,21 +55,21 @@ def parse_attendance_days(attendance_days_text: str) -> list[str]:
 
 def validar_preferencias_tratamiento(
     slot_type: str,
-    time_preference: str,
+    time_preference: str | None,
     transport_mode: str,
     preferred_hour: str | None,
 ):
     if slot_type not in ["SIMPLE", "DOBLE"]:
         return "Debes seleccionar si el hueco es simple o doble."
 
-    if time_preference not in ["MAÑANA", "TARDE"]:
-        return "Debes seleccionar mañana o tarde."
+    if time_preference not in [None, "", "MAÑANA", "TARDE"]:
+        return "Selecciona mañana, tarde o deja el turno vacío."
 
     if transport_mode not in ["NORMAL", "AMBULANCIA"]:
         return "Debes seleccionar el modo de transporte."
 
     if transport_mode == "AMBULANCIA":
-        if time_preference != "MAÑANA":
+        if time_preference == "TARDE":
             return "Si el paciente viene en ambulancia solo puede ser por la mañana."
 
         if preferred_hour not in ["09:00", "12:00"]:

@@ -3,7 +3,7 @@
 from datetime import date, time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Body(BaseModel):
@@ -34,12 +34,23 @@ class WaitingRequest(Body):
     request_date: date
     eligible: bool
     slot_type: Literal["SIMPLE", "DOBLE"]
-    time_preference: Literal["MAÑANA", "TARDE"]
+    time_preference: Literal["MAÑANA", "TARDE"] | None = None
     transport_mode: Literal["NORMAL", "AMBULANCIA"]
     preferred_hour: str | None = Field(default=None, max_length=5)
     coordination_rule: Literal["NINGUNA", "MISMO_DIA", "DIAS_ALTERNOS"]
     ai_consent_accepted: bool | None = None
     confirm_duplicate: bool = Field(default=False, strict=True)
+
+    @field_validator("time_preference", mode="before")
+    @classmethod
+    def empty_shift(cls, value):
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def ambulance_shift(self):
+        if self.transport_mode == "AMBULANCIA" and self.time_preference is None:
+            self.time_preference = "MAÑANA"
+        return self
 
 
 class Assignment(Body):
